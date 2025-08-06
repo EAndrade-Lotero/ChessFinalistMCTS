@@ -19,16 +19,14 @@ from __future__ import annotations
 
 import heapq
 import pydot
-
 import numpy as np
-from numpy.random import Generator, default_rng
 
 from pprint import pprint
-from itertools import count
-from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Set, Optional
 
-from agents.base_classes import PolicyProtocol, GameProtocol
+from itertools import count
+
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Tuple, Set
 
 # --------------------------------------------------------------------------- #
 #                           1.  Node statistics                               #
@@ -59,8 +57,6 @@ class SearchTreeNode:
         Parent node; ``None`` for the root.
     action : Any | None
         Action that led from *parent* to *state* (``None`` at root).
-    untried_actions : List[Any]
-        List of untried actions from this node.
     value : NodeValue
         Current playout statistics.
     ucb_constant : float
@@ -72,18 +68,15 @@ class SearchTreeNode:
         self,
         state: Any,
         parent: "SearchTreeNode | None",
-        action: "Any | None",
-        untried_actions: List[Any],
+        action: Any,
         value: NodeValue,
-        ucb_constant: float
+        ucb_constant: float,
     ) -> None:
         self.state = state
         self.parent = parent
         self.action = action
-        self.untried_actions = untried_actions
         self.value = value
         self.ucb_constant = ucb_constant
-        self.children = []
 
     # ------------- Monte-Carlo helpers ---------------------------------- #
     def backpropagate(self, result: int) -> Tuple[Any, NodeValue]:
@@ -121,9 +114,6 @@ class SearchTreeNode:
     def depth(self) -> int:
         return 0 if self.parent is None else 1 + self.parent.depth()
 
-    def is_fully_expanded(self) -> bool:
-        return not self.untried_actions
-        
     def __str__(self) -> str:
         root_flag = "--root--" if self.parent is None else ""
         s = f"State {root_flag}\n{self.state}\nDepth: {self.depth()}\n"
@@ -134,59 +124,38 @@ class SearchTreeNode:
 
 
 # --------------------------------------------------------------------------- #
-#                       3.  MCTS                                              #
+#                       3.  Beam-width limited MCTS                           #
 # --------------------------------------------------------------------------- #
 class GameSearchTree:
     """
     Beam-width-limited Monte-Carlo Tree Search with an *ascending* heap frontier.
-
-    Parameters
-    ----------
-        rng
-        `numpy.random.Generator` used for sampling.  If *None*, the policy
-        creates an independent generator via `default_rng()`.
     """
 
     def __init__(
         self,
         state: Any,
-        game: GameProtocol,
-        rollout_policy: PolicyProtocol,
+        game: Any,
+        rollout_policy: Callable[[Any], Any],
         sim_limit: int,
         beam_width: int,
         ucb_constant: float,
-        rng: Optional[Generator] = None
+        seed: int
     ) -> None:
         # Random number generator
-        self.rng: Generator = rng or default_rng()
+        self.rng = np.random.default_rng(42)
 
         # Hyper-parameters & helpers
-        if not isinstance(game, GameProtocol):
-            raise TypeError(
-                "`game` must implement a Game Protocol."
-            )
         self.game = game
-
-        if not isinstance(rollout_policy, PolicyProtocol):
-            raise TypeError(
-                "`game` must implement a Policy Protocol."
-            )
         self.rollout_policy = rollout_policy
-
         self.sim_limit = sim_limit
         self.beam_width = beam_width + 1
         self.ucb_constant = ucb_constant
 
         # Root node
-        self._root_actions: List[Any] = self.game.actions(state)
-        if not self._root_actions:
-            raise Exception('No actions possible from given state')
-
         self.root = SearchTreeNode(
             state=state,
             parent=None,
             action=None,
-            untried_actions=self._root_actions,
             value=NodeValue(0, 0),
             ucb_constant=ucb_constant,
         )
@@ -199,7 +168,9 @@ class GameSearchTree:
         self.total_playouts: int = 0
 
         # First expansion populates frontier and per-move stats
+        self._root_actions: List[Any]
         self.action_stats = self._expand_root()
+
 
     # ---------------- public helper to pick the best root move ----------- #
     def best_root_action(self) -> Any:
@@ -224,38 +195,71 @@ class GameSearchTree:
         return node
 
     # ---------------- tree expansion ------------------------------------ #
-    def expand_node(self, node: SearchTreeNode) -> None:
-        """Expand node with rollout policy"""
+    def expand_node(self, node: SearchTreeNode) -> SearchTreeNode | None:
+        actions = self.game.actions(node.state)
+        if not actions:
+            return
+        if len(actions) > self.beam_width:
+            actions = self.rng.choice(actions, self.beam_width, replace=False)
 
-        assert(not node.is_fully_expanded()), f"Error: Node cannot be expanded!\n{node}"
-        untried_actions = node.untried_actions
+        children: List[SearchTreeNode] = []
+        for a in actions:
+            s_black = self.game.result(node.state, a)
 
-        # Choose an action according to rollout policy
-        probabilities_untried_actions = self.rollout_policy.predict_in_list(untried_actions)
-        action = self.rng.choice(untried_actions, p=probabilities_untried_actions)
+            # Immediate terminal?
+            if self.game.is_terminal(s_black):
+                reward = 1 if self.game.utility(s_black) > 0 else 0
+                self._backpropagate(node, reward)
+                continue
 
-        # Create new node
-        state = self.game.result(node.state, action)
-        child = SearchTreeNode(
-            state=state,
-            parent=node,
-            action=action,
-            untried_actions=self.game.actions(state),
-            value=NodeValue(0, 0),
-            ucb_constant=self.ucb_constant
-        )
+            a_black = self.rollout_policy(s_black)
+            s_white = self.game.result(s_black, a_black)
 
-        # Add to frontier
-        self._push_leaf(child, child.ucb(self.total_playouts))
+            child = SearchTreeNode(
+                s_white, node, a, NodeValue(0, 0), self.ucb_constant
+            )
+            children.append(child)
+
+        if not children:
+            return None
+
+        for c in children:
+            self._push_leaf(c, c.ucb(self.total_playouts))
+
+        
+        
+        return self.rng.choice(children)
 
     def _expand_root(self) -> Dict[str, NodeValue]:
+        node = self.root
+        actions = self.game.actions(node.state)
+        if not actions:
+            return {}
 
-        # Add to frontier
-        self._push_leaf(self.root, self.root.ucb(self.total_playouts))
+        if len(actions) > self.beam_width:
+            actions = self.rng.choice(actions, self.beam_width, replace=False)
+        self._root_actions = actions
 
-        # Create dictionary for best root action selection
-        stats: Dict[str, NodeValue] = {str(a): NodeValue(0, 0) for a in self._root_actions}
+        stats: Dict[str, NodeValue] = {str(a): NodeValue(0, 0) for a in actions}
+        children: List[SearchTreeNode] = []
 
+        for a in actions:
+            s_white = self.game.result(node.state, a)
+
+            if self.game.is_terminal(s_white):
+                stats[str(a)] = NodeValue(1, 1)
+                continue
+
+            a_black = self.rollout_policy(s_white)
+            s_black = self.game.result(s_white, a_black)
+
+            child = SearchTreeNode(
+                s_black, node, a, NodeValue(0, 0), self.ucb_constant
+            )
+            children.append(child)
+
+        for c in children:
+            self._push_leaf(c, c.ucb(self.total_playouts))
         return stats
 
     # ---------------- selection & backup -------------------------------- #

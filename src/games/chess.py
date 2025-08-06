@@ -14,7 +14,7 @@ gym-like interface:
     ▸ `move_manual()`      –   apply a SAN string *if* it is legal
     ▸ `result()`           –   successor state after a move
     ▸ `is_terminal()`      –   has the game ended?
-    ▸ `utility()`          –   ±1000 for check-mate, 0 for draw
+    ▸ `utility()`          –   ±1 for check-mate, 0 for draw
     ▸ `announce_result()`  –   pretty-print winner / draw
 
 Author: <your-name>
@@ -27,8 +27,10 @@ import chess
 import chess.svg
 from IPython.display import SVG, display
 
+from agents.base_classes import GameProtocol
 
-class KRK:
+
+class KRK(GameProtocol):
     """
     Create a King-and-Rook vs King end-game playground.
 
@@ -183,14 +185,14 @@ class KRK:
         """
         Compute a simple utility value for terminal positions.
 
-        +1000 : the *side that just moved* delivers mate  
-        -1000 : the *side to move* is mated  
+        +1 : the *side that just moved* delivers mate  
+        -1 : the *side to move* is mated  
            0  : any draw (stalemate, 50-move rule, insufficient material)
 
         Returns
         -------
         int | None
-            ±1000 or 0 for terminal boards, otherwise None.
+            ±1 or 0 for terminal boards, otherwise None.
         """
         outcome = board.outcome()
         if outcome is None:
@@ -198,7 +200,7 @@ class KRK:
 
         if outcome.winner is None:                # draw
             return 0
-        return 1000 if outcome.winner else -1000  # True == white, False == black
+        return 1 if outcome.winner else -1
 
     # ------------------------------------------------------------------ #
     #                        Convenience printing                        #
