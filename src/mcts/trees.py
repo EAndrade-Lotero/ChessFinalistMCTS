@@ -190,18 +190,31 @@ class GameSearchTree:
         self._counter = 0  # tie-breaker for equal priorities
 
     # ---------------- public helper to pick the best root move ----------- #
-    def best_root_action(self) -> Any:
-        """Return the root-level action with **highest average reward**."""
-        best_mean, best_action_str = -float("inf"), None
-        for a_str, v in self.action_stats.items():
-            mean = v.reward / v.playouts if v.playouts else 0.0
-            if mean > best_mean:
-                best_mean, best_action_str = mean, a_str
-        # Locate the actual action object by string comparison
-        matches = [a for a in self._root_actions if str(a) == best_action_str]
-        assert matches, "Inconsistent state: action string not found."
-        return matches[0]
+    def get_best_root_action(self) -> Any | None:
+        """Pick the root's action with highest UCB"""
+        best_child = self.get_child_with_highest_ucb(self.root)
+        if best_child is None:
+            return None
+        else:
+            return best_child.action
 
+    def get_child_with_highest_ucb(self, node: SearchTreeNode) -> Any | None:
+        """Pick the node's child with highest UCB"""
+        best_ucb = -np.inf
+        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+        matches = []
+        for child in node.children:
+            ucb = child.ucb(self.total_playouts) * multiplier
+            if ucb > best_ucb:
+                best_ucb = ucb
+                matches = []
+            if ucb == best_ucb:
+                matches.append(child)
+        if len(matches) == 0:
+            return None
+        best_child = self.rng.choice(matches)
+        return best_child
+    
     # ---------------- tree expansion ------------------------------------ #
     def expand_node(self, node: SearchTreeNode) -> None:
         """Expand node with rollout policy"""
@@ -246,7 +259,7 @@ class GameSearchTree:
             raise Exception('Error: No valid actions from root!')
 
         if len(actions) > self.beam_width:
-            actions = self.rng.choice(actions, self.beam_width, replace=False)
+            actions = self.rng.choice(actions, self.beam_width, replace=False).tolist()
         self._root_actions = actions
 
         # Root node
@@ -264,7 +277,7 @@ class GameSearchTree:
 
             untried_actions = self.game.actions(new_state)
             if len(untried_actions) > self.beam_width:
-                untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False)
+                untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
 
             child = SearchTreeNode(
                 state=new_state, 
@@ -283,42 +296,31 @@ class GameSearchTree:
     
     # ---------------- selection & backup -------------------------------- #
     def select_ucb(self) -> SearchTreeNode | None:
-        """Pick the node's child with highest UCB"""
-        best_ucb = -np.inf
-        self._frontier = []
-        self._push_node(self.root, self.root.ucb(self.total_playouts))
-        matches = []
-        while len(self._frontier) > 0:
-            node = self._pop_best_node()
-            for child in node.children:
-                if not self.game.is_terminal(child.state):
-                    ucb = child.ucb(self.total_playouts)
-                    if not child.is_fully_expanded():
-                        if ucb > best_ucb:
-                            best_ucb = ucb
-                            matches = []
-                        if ucb == best_ucb:
-                            matches.append(child)
-                    self._push_node(child, child.ucb(self.total_playouts))
-        if len(matches) == 0:
-            return None
-        return self.rng.choice(matches)
+        """Tree search strategy"""
+        node = self.root
+        best_node = self._recursive_select_ucb(node)
+        return best_node
 
-    def get_best_root_action(self) -> Any | None:
-        """Pick the root's action with highest UCB"""
-        best_ucb = -np.inf
-        matches = []
-        for child in self.root.children:
-            ucb = child.ucb(self.total_playouts)
-            if ucb > best_ucb:
-                best_ucb = ucb
-                matches = []
-            if ucb == best_ucb:
-                matches.append(child)
-        if len(matches) == 0:
-            return None
-        best_child = self.rng.choice(matches)
-        return best_child.action
+    def _recursive_select_ucb(self, node: SearchTreeNode) -> SearchTreeNode | None:
+        """Recursive search"""
+
+        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+
+        for child in node.children:
+            if not self.game.is_terminal(child.state):
+                ucb = child.ucb(self.total_playouts) * multiplier
+                self._push_node(child, ucb)
+
+        while len(self._frontier) > 0:
+            best_child = self._pop_best_node()
+            # print(f"Checking {best_child.action}...")
+            if not best_child.is_fully_expanded():
+                # print("This is the node!")
+                return best_child
+            else:
+                # print("Entering recursion")
+                return self._recursive_select_ucb(best_child)
+        return None
 
     def backpropagate(self, node: SearchTreeNode, result: int) -> None:
         """Update stats and rebuild frontier priorities after each playout."""
@@ -365,7 +367,7 @@ class GameSearchTree:
 
     # ---------------- heap helpers -------------------------------------- #
     def _push_node(self, node: SearchTreeNode, priority: float) -> None:
-        heapq.heappush(self._frontier, (priority, self._counter, node))
+        heapq.heappush(self._frontier, (-priority, self._counter, node))
         self._counter -= 1
 
     def _pop_best_node(self) -> SearchTreeNode:
@@ -384,7 +386,8 @@ class GameSearchTree:
             msg = f"Value={node.value}\n"
             msg += f"To play={player}\n"
             msg += f"UCB={node.ucb(self.total_playouts):.2f}\n"
-            msg += f"Finished={node.is_fully_expanded()}"
+            msg += f"Finished={node.is_fully_expanded()}\n"
+            msg += f"Terminal={self.game.is_terminal(node.state)}"
             if node.action is None:
                 msg = "root\n" + msg
             else: 

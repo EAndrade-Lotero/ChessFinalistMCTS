@@ -186,8 +186,7 @@ class KRK(GameProtocol):
         Compute a simple utility value for terminal positions.
 
         +1 : the *side that just moved* delivers mate  
-        -1 : the *side to move* is mated  
-           0  : any draw (stalemate, 50-move rule, insufficient material)
+        -1 : the *side to move* is mated, or any draw (stalemate, 50-move rule, insufficient material)
 
         Returns
         -------
@@ -199,7 +198,7 @@ class KRK(GameProtocol):
             return 0
 
         if outcome.winner is None:                # draw
-            return 0
+            return -1
         return 1 if outcome.winner else -1
 
     # ------------------------------------------------------------------ #
