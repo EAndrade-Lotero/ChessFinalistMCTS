@@ -19,14 +19,16 @@ from __future__ import annotations
 
 import heapq
 import pydot
+
 import numpy as np
+from numpy.random import Generator, default_rng
 
 from pprint import pprint
-
 from itertools import count
-
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, Set
+from typing import Any, Callable, Dict, List, Tuple, Set, Optional
+
+from agents.base_classes import PolicyProtocol, GameProtocol
 
 # --------------------------------------------------------------------------- #
 #                           1.  Node statistics                               #
@@ -57,6 +59,8 @@ class SearchTreeNode:
         Parent node; ``None`` for the root.
     action : Any | None
         Action that led from *parent* to *state* (``None`` at root).
+    untried_actions : List[Any]
+        List of untried actions from this node.
     value : NodeValue
         Current playout statistics.
     ucb_constant : float
@@ -68,16 +72,19 @@ class SearchTreeNode:
         self,
         state: Any,
         parent: "SearchTreeNode | None",
-        action: Any,
+        action: "Any | None",
+        untried_actions: List[Any],
         value: NodeValue,
-        ucb_constant: float,
+        ucb_constant: float
     ) -> None:
         self.state = state
         self.parent = parent
         self.action = action
+        self.untried_actions = untried_actions
         self.value = value
         self.ucb_constant = ucb_constant
-
+        self.children = []
+        
     # ------------- Monte-Carlo helpers ---------------------------------- #
     def backpropagate(self, result: int) -> Tuple[Any, NodeValue]:
         """
@@ -90,10 +97,10 @@ class SearchTreeNode:
         self.value.reward += result
         self.value.playouts += 1
 
-        if self.depth() == 1:  # parent is the root
+        if self.depth() == 0:  # parent is the root
             return self.action, self.value
         else:
-            # recurse until we reach depth 1
+            # recurse until we reach depth 0
             return self.parent.backpropagate(result)  # type: ignore[arg-type]
 
     def ucb(self, total_visits: int) -> float:
@@ -114,6 +121,9 @@ class SearchTreeNode:
     def depth(self) -> int:
         return 0 if self.parent is None else 1 + self.parent.depth()
 
+    def is_fully_expanded(self) -> bool:
+        return len(self.untried_actions) == 0
+        
     def __str__(self) -> str:
         root_flag = "--root--" if self.parent is None else ""
         s = f"State {root_flag}\n{self.state}\nDepth: {self.depth()}\n"
@@ -124,167 +134,201 @@ class SearchTreeNode:
 
 
 # --------------------------------------------------------------------------- #
-#                       3.  Beam-width limited MCTS                           #
+#                       3.  MCTS                                              #
 # --------------------------------------------------------------------------- #
 class GameSearchTree:
     """
     Beam-width-limited Monte-Carlo Tree Search with an *ascending* heap frontier.
+
+    Parameters
+    ----------
+        rng
+        `numpy.random.Generator` used for sampling.  If *None*, the policy
+        creates an independent generator via `default_rng()`.
     """
 
     def __init__(
         self,
         state: Any,
-        game: Any,
-        rollout_policy: Callable[[Any], Any],
+        game: GameProtocol,
+        rollout_policy: PolicyProtocol,
         sim_limit: int,
         beam_width: int,
         ucb_constant: float,
-        seed: int
+        n_iterations: int,
+        rng: Optional[Generator] = None
     ) -> None:
         # Random number generator
-        self.rng = np.random.default_rng(42)
+        self.rng: Generator = rng or default_rng()
 
         # Hyper-parameters & helpers
+        if not isinstance(game, GameProtocol):
+            raise TypeError(
+                "`game` must implement a Game Protocol."
+            )
         self.game = game
+
+        if not isinstance(rollout_policy, PolicyProtocol):
+            raise TypeError(
+                "`game` must implement a Policy Protocol."
+            )
         self.rollout_policy = rollout_policy
+
         self.sim_limit = sim_limit
-        self.beam_width = beam_width + 1
+        self.beam_width = beam_width
         self.ucb_constant = ucb_constant
+        self.n_iterations = n_iterations
+
+        # Global playout counter
+        self.total_playouts: int = 0
+
+        # Initialize the root's children
+        self._expand_root(state)
+
+        # Frontier implemented with `heapq`
+        self._frontier: List[Tuple[float, int, SearchTreeNode]] = []
+        self._counter = 0  # tie-breaker for equal priorities
+
+    # ---------------- public helper to pick the best root move ----------- #
+    def get_best_root_action(self) -> Any | None:
+        """Pick the root's action with highest UCB"""
+        best_child = self.get_child_with_highest_ucb(self.root)
+        if best_child is None:
+            return None
+        else:
+            return best_child.action
+
+    def get_child_with_highest_ucb(self, node: SearchTreeNode) -> Any | None:
+        """Pick the node's child with highest UCB"""
+        best_ucb = -np.inf
+        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+        matches = []
+        for child in node.children:
+            ucb = child.ucb(self.total_playouts) * multiplier
+            if ucb > best_ucb:
+                best_ucb = ucb
+                matches = []
+            if ucb == best_ucb:
+                matches.append(child)
+        if len(matches) == 0:
+            return None
+        best_child = self.rng.choice(matches)
+        return best_child
+    
+    # ---------------- tree expansion ------------------------------------ #
+    def expand_node(self, node: SearchTreeNode) -> None:
+        """Expand node with rollout policy"""
+
+        assert(not node.is_fully_expanded()), f"Error: Node cannot be expanded!\n{node}"
+
+        # Choose an action according to rollout policy
+        probabilities_untried_actions = self.rollout_policy.predict_in_list(node.state, node.untried_actions)
+        action = self.rng.choice(node.untried_actions, p=probabilities_untried_actions)
+        if isinstance(node.untried_actions, list):
+            node.untried_actions.remove(action)
+        else:
+            raise Exception(f"Error: untried action should be a list (got {type(node.untried_actions)})")
+
+        # Create new child
+        new_state = self.game.result(node.state, action)
+
+        untried_actions = self.game.actions(new_state)
+        if len(untried_actions) > self.beam_width:
+            untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
+
+        child = SearchTreeNode(
+            state=new_state,
+            parent=node,
+            action=action,
+            untried_actions=untried_actions,
+            value=NodeValue(0, 0),
+            ucb_constant=self.ucb_constant
+        )
+
+        if self.game.is_terminal(child.state):
+            result = self.game.utility(child.state)
+            self.backpropagate(child, result)
+
+        node.children.append(child)
+
+    def _expand_root(self, state: Any) -> None:
+
+        # Get root actions
+        actions = self.game.actions(state)
+        if not actions:
+            raise Exception('Error: No valid actions from root!')
+
+        if len(actions) > self.beam_width:
+            actions = self.rng.choice(actions, self.beam_width, replace=False).tolist()
+        self._root_actions = actions
 
         # Root node
         self.root = SearchTreeNode(
             state=state,
             parent=None,
             action=None,
+            untried_actions=[],
             value=NodeValue(0, 0),
-            ucb_constant=ucb_constant,
+            ucb_constant=self.ucb_constant,
         )
 
-        # Frontier implemented with `heapq`
-        self._frontier: List[Tuple[float, int, SearchTreeNode]] = []
-        self._counter = 0  # tie-breaker for equal priorities
+        for a in self._root_actions:
+            new_state = self.game.result(state, a)
 
-        # Global playout counter
-        self.total_playouts: int = 0
-
-        # First expansion populates frontier and per-move stats
-        self._root_actions: List[Any]
-        self.action_stats = self._expand_root()
-
-
-    # ---------------- public helper to pick the best root move ----------- #
-    def best_root_action(self) -> Any:
-        """Return the root-level action with **highest average reward**."""
-        best_mean, best_action_str = -float("inf"), None
-        for a_str, v in self.action_stats.items():
-            mean = v.reward / v.playouts if v.playouts else 0.0
-            if mean > best_mean:
-                best_mean, best_action_str = mean, a_str
-        # Locate the actual action object by string comparison
-        matches = [a for a in self._root_actions if str(a) == best_action_str]
-        assert matches, "Inconsistent state: action string not found."
-        return matches[0]
-
-    # ---------------- heap helpers -------------------------------------- #
-    def _push_leaf(self, node: SearchTreeNode, priority: float) -> None:
-        heapq.heappush(self._frontier, (priority, self._counter, node))
-        self._counter += 1
-
-    def _pop_best_leaf(self) -> SearchTreeNode:
-        _, _, node = heapq.heappop(self._frontier)
-        return node
-
-    # ---------------- tree expansion ------------------------------------ #
-    def expand_node(self, node: SearchTreeNode) -> SearchTreeNode | None:
-        actions = self.game.actions(node.state)
-        if not actions:
-            return
-        if len(actions) > self.beam_width:
-            actions = self.rng.choice(actions, self.beam_width, replace=False)
-
-        children: List[SearchTreeNode] = []
-        for a in actions:
-            s_black = self.game.result(node.state, a)
-
-            # Immediate terminal?
-            if self.game.is_terminal(s_black):
-                reward = 1 if self.game.utility(s_black) > 0 else 0
-                self._backpropagate(node, reward)
-                continue
-
-            a_black = self.rollout_policy(s_black)
-            s_white = self.game.result(s_black, a_black)
+            untried_actions = self.game.actions(new_state)
+            if len(untried_actions) > self.beam_width:
+                untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
 
             child = SearchTreeNode(
-                s_white, node, a, NodeValue(0, 0), self.ucb_constant
+                state=new_state, 
+                parent=self.root, 
+                action=a, 
+                untried_actions=untried_actions,
+                value=NodeValue(0, 0),
+                ucb_constant=self.ucb_constant
             )
-            children.append(child)
 
-        if not children:
-            return None
+            if self.game.is_terminal(child.state):
+                result = self.game.utility(child.state)
+                self.backpropagate(child, result)
 
-        for c in children:
-            self._push_leaf(c, c.ucb(self.total_playouts))
-
-        
-        
-        return self.rng.choice(children)
-
-    def _expand_root(self) -> Dict[str, NodeValue]:
-        node = self.root
-        actions = self.game.actions(node.state)
-        if not actions:
-            return {}
-
-        if len(actions) > self.beam_width:
-            actions = self.rng.choice(actions, self.beam_width, replace=False)
-        self._root_actions = actions
-
-        stats: Dict[str, NodeValue] = {str(a): NodeValue(0, 0) for a in actions}
-        children: List[SearchTreeNode] = []
-
-        for a in actions:
-            s_white = self.game.result(node.state, a)
-
-            if self.game.is_terminal(s_white):
-                stats[str(a)] = NodeValue(1, 1)
-                continue
-
-            a_black = self.rollout_policy(s_white)
-            s_black = self.game.result(s_white, a_black)
-
-            child = SearchTreeNode(
-                s_black, node, a, NodeValue(0, 0), self.ucb_constant
-            )
-            children.append(child)
-
-        for c in children:
-            self._push_leaf(c, c.ucb(self.total_playouts))
-        return stats
-
+            self.root.children.append(child)
+    
     # ---------------- selection & backup -------------------------------- #
-    def select_ucb(self) -> SearchTreeNode:
-        """Pick the frontier node with **highest UCB** (lowest priority)."""
-        return self._pop_best_leaf()
+    def select_ucb(self) -> SearchTreeNode | None:
+        """Tree search strategy"""
+        node = self.root
+        best_node = self._recursive_select_ucb(node)
+        return best_node
 
-    def _backpropagate(self, node: SearchTreeNode, result: int) -> None:
+    def _recursive_select_ucb(self, node: SearchTreeNode) -> SearchTreeNode | None:
+        """Recursive search"""
+
+        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+
+        for child in node.children:
+            if not self.game.is_terminal(child.state):
+                ucb = child.ucb(self.total_playouts) * multiplier
+                self._push_node(child, ucb)
+
+        while len(self._frontier) > 0:
+            best_child = self._pop_best_node()
+            # print(f"Checking {best_child.action}...")
+            if not best_child.is_fully_expanded():
+                # print("This is the node!")
+                return best_child
+            else:
+                # print("Entering recursion")
+                return self._recursive_select_ucb(best_child)
+        return None
+
+    def backpropagate(self, node: SearchTreeNode, result: int) -> None:
         """Update stats and rebuild frontier priorities after each playout."""
         self.total_playouts += 1
         action, new_val = node.backpropagate(result)
-        self.action_stats[str(action)] = new_val
-
-        # Re-heapify every leaf with updated total_playouts
-        new_heap: List[Tuple[float, int, SearchTreeNode]] = []
-        self._counter = 0
-        for _, _, leaf in self._frontier:
-            heapq.heappush(
-                new_heap, (leaf.ucb(self.total_playouts), self._counter, leaf)
-            )
-            self._counter += 1
-        self._frontier = new_heap
 
     # ---------------- Policy rollout -------------------------------- #
-    def make_rollout(self, node: SearchTreeNode, result: int) -> float:
+    def make_rollout(self, node: SearchTreeNode) -> float:
         """Self-play using rollout policy"""
         counter = 0
         state = node.state.copy()
@@ -294,43 +338,65 @@ class GameSearchTree:
             counter += 1
         return self.game.utility(state)
 
-    # ---------------- visualization helpers -------------------------------- #
-    def build_children_dict(self) -> List[SearchTreeNode]:
-        """Return {parent: [child, …]} for all nodes reachable from the leaves."""
-        children = defaultdict(list)
-        leafs = [t[-1] for t in self._frontier]
-        for leaf in leafs:
-            node = leaf
-            while node.parent is not None:
-                children[node.parent].append(node)
-                node = node.parent
-        return children
+    # ---------------- The pipeline -------------------------------------- #
+    def make_decision(self) -> Any | None:
+        counter = 0
+        while counter < self.n_iterations:
+
+            # Step 1: Node selection
+            node = self.select_ucb()
+            if node is None:
+                raise Exception(f"Ooops, no ucb selection from node\n{node}")
+            if node.is_fully_expanded():
+                raise Exception(f"Ooops, no expansion from node\n{node}")
+
+            # Step 2: Expansion
+            self.expand_node(node)
+
+            # Step 3: Rollout
+            rollout_result = self.make_rollout(node)
+
+            # Step 4: Backpropagate
+            self.backpropagate(node, rollout_result)
+
+            counter += 1
+
+        # Show best action
+        best_root_action = self.get_best_root_action()  
+        return best_root_action      
+
+    # ---------------- heap helpers -------------------------------------- #
+    def _push_node(self, node: SearchTreeNode, priority: float) -> None:
+        heapq.heappush(self._frontier, (-priority, self._counter, node))
+        self._counter -= 1
+
+    def _pop_best_node(self) -> SearchTreeNode:
+        _, _, node = heapq.heappop(self._frontier)
+        return node
     
+    # ---------------- visualization helpers -------------------------------- #   
     def to_pydot(self) -> pydot.Dot:
         """Return a pydot graph representing the current search tree."""
 
         # ------------------------------------------------------------------ #
         # 1.  User-facing label function (make it a real Callable for mypy)
         # ------------------------------------------------------------------ #
-        label_fn: Callable[[SearchTreeNode], str] = (
-            lambda n: "root" if n.action is None else f"{n.action}\nValue={n.value}"
-        )
+        def label_fn(node: SearchTreeNode) -> str:
+            player = self.game.player(node.state)
+            msg = f"Value={node.value}\n"
+            msg += f"To play={player}\n"
+            msg += f"UCB={node.ucb(self.total_playouts):.2f}\n"
+            msg += f"Finished={node.is_fully_expanded()}\n"
+            msg += f"Terminal={self.game.is_terminal(node.state)}"
+            if node.action is None:
+                msg = "root\n" + msg
+            else: 
+                msg = f"{node.action}\n" + msg
+            return msg
 
         # ------------------------------------------------------------------ #
-        # 2.  Build a *deduplicated* children map
+        # 2. Unique string id for each SearchTreeNode
         # ------------------------------------------------------------------ #
-        raw_children: Dict[SearchTreeNode, List[SearchTreeNode]] = self.build_children_dict()
-        # convert list → set to kill duplicates in O(N)
-        children: Dict[SearchTreeNode, Set[SearchTreeNode]] = {
-            parent: set(child_list) for parent, child_list in raw_children.items()
-        }
-
-        # ------------------------------------------------------------------ #
-        # 3.  Initialise the pydot graph
-        # ------------------------------------------------------------------ #
-        graph: pydot.Dot = pydot.Dot(graph_type="digraph", rankdir="TB")
-
-        # Unique string id for each SearchTreeNode
         _id_counter = count()
         id_map: Dict[SearchTreeNode, str] = {}
 
@@ -341,24 +407,24 @@ class GameSearchTree:
             return id_map[node]
 
         # ------------------------------------------------------------------ #
-        # 4.  DFS while tracking visited nodes to avoid re-adding edges/nodes
+        # 3.  Initialise the pydot graph
         # ------------------------------------------------------------------ #
-        visited: Set[SearchTreeNode] = set()
+        graph: pydot.Dot = pydot.Dot(graph_type="digraph", rankdir="TB")
+
+        # ------------------------------------------------------------------ #
+        # 3.  DFS adding edges/nodes
+        # ------------------------------------------------------------------ #
         stack: List[SearchTreeNode] = [self.root]
 
         while stack:
             node: SearchTreeNode = stack.pop()
-
-            if node in visited:          # already processed → skip
-                continue
-            visited.add(node)
 
             node_id: str = get_id(node)
             graph.add_node(
                 pydot.Node(node_id, label=label_fn(node), shape="box")
             )
 
-            for child in children.get(node, set()):
+            for child in node.children:
                 child_id: str = get_id(child)
                 graph.add_edge(pydot.Edge(node_id, child_id))
                 stack.append(child)

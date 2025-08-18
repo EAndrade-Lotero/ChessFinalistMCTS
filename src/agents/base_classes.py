@@ -20,16 +20,46 @@ class PolicyProtocol(Protocol):
     def save(self, file: str) -> None: ...
     def load(self, file: str) -> None: ...
 
+
 @runtime_checkable
 class GameProtocol(Protocol):
-    """Minimal game interface needed by `GameUniformPolicy`."""
+    """Minimal game interface."""
 
-    def actions(self, state: Any) -> Sequence[Any]:  # pragma: no cover
-        ...
-    def utility(self, state: Any) -> Sequence[Any]:  # pragma: no cover
-        ...
-    def result(self, state: Any, action: Any) -> Sequence[Any]:  # pragma: no cover
-        ...
+    # Attributes
+    initial_state: S
+
+    # Methods
+    def is_terminal(self, state: S) -> bool: ...
+    def player(self, state: S) -> Any: ...
+    def utility(self, state: S) -> Optional[float]: ...
+    def actions(self, state: S) -> Sequence[A]: ...
+    def result(self, state: S, action: A) -> S: ...
+    def render(self, state: S) -> None: ...
+
+
+@runtime_checkable
+class PlayerProtocol(Protocol, Generic[S, A]):
+    """Minimal second-player interface expected by GymEnvFromGameAndPlayer2."""
+
+    states: List[S]
+    debug: bool
+    choices: Sequence[A]
+
+    def reset(self) -> None: ...
+    def make_decision(self) -> A: ...
+
+@runtime_checkable
+class EncoderProtocol(Protocol, Generic[S, A]):
+    """Encodes domain states/actions to gym spaces and back (if needed)."""
+
+    observation_space: spaces.Space
+    action_space: spaces.Space
+
+    def encode_obs(self, state: S) -> Any: ...
+    # If action is already primitive (int), this can be identity:
+    def encode_action(self, action: A) -> Any: ...
+    # If you need to map int→domain action:
+    def decode_action(self, action: Any, valid_actions: Sequence[A]) -> A: ...
 
 
 class PolicyAgent(ABC):

@@ -149,7 +149,7 @@ class GameSearchTree:
 
     def __init__(
         self,
-        state: Any,
+        root: Any | SearchTreeNode,
         game: GameProtocol,
         rollout_policy: PolicyProtocol,
         sim_limit: int,
@@ -183,7 +183,14 @@ class GameSearchTree:
         self.total_playouts: int = 0
 
         # Initialize the root's children
-        self._expand_root(state)
+        if isinstance(root, SearchTreeNode):
+            self.root = root
+        else:
+            try:
+                self._expand_root(root)
+            except Exception as e:
+                print(f'A game state was expected, but something went wrong!')
+                raise e
 
         # Frontier implemented with `heapq`
         self._frontier: List[Tuple[float, int, SearchTreeNode]] = []
@@ -215,6 +222,12 @@ class GameSearchTree:
         best_child = self.rng.choice(matches)
         return best_child
     
+    def get_root_child_from_action(self, action):
+        for child in self.root.children:
+            if action == child.action:
+                return child
+        return None
+
     # ---------------- tree expansion ------------------------------------ #
     def expand_node(self, node: SearchTreeNode) -> None:
         """Expand node with rollout policy"""
