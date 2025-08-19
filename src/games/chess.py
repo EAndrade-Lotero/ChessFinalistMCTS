@@ -25,6 +25,11 @@ from __future__ import annotations
 import copy
 import chess
 import chess.svg
+import cairosvg
+import numpy as np
+
+from PIL import Image
+from io import BytesIO
 from IPython.display import SVG, display
 
 from agents.base_classes import GameProtocol
@@ -90,6 +95,38 @@ class KRK(GameProtocol):
         board : chess.Board
         """
         display(SVG(chess.svg.board(board, size=300)))
+
+    @staticmethod
+    def image_to_numpy(board: chess.Board) -> np.ndarray:
+        """
+        Return board as a NumPy array from SVG image.
+
+        Parameters
+        ----------
+        board : chess.Board
+
+        Returns
+        -------
+        np.ndarray
+            Shape (size, size, C) for RGB/RGBA or (size, size) for 'L'.
+        """
+        size = 300
+        mode = 'RGB'
+
+        # 1) Build SVG string from python-chess
+        svg_str = chess.svg.board(board, size=size)
+
+        # 2) Convert SVG → PNG bytes
+        png_bytes = cairosvg.svg2png(bytestring=svg_str.encode("utf-8"))
+
+        # 3) Load PNG bytes into a Pillow image and convert mode
+        img = Image.open(BytesIO(png_bytes)).convert(mode)
+
+        # 4) Convert to NumPy array
+        arr = np.asarray(img)
+
+        # 5) normalization
+        return (arr.astype(np.float32) / 255.0)
 
     @staticmethod
     def player(board: chess.Board) -> str:

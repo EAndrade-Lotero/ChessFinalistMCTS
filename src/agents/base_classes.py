@@ -3,12 +3,22 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import (
-    List, Optional, Protocol, Sequence, Any, runtime_checkable
+    List, Optional, Protocol, Sequence, Any, 
+    runtime_checkable, Generic, TypeVar
 )
 
 import numpy as np
 from numpy.random import Generator, default_rng
 from numpy.typing import NDArray
+
+
+# --------------------------------------------------------------------------- #
+#                                Protocols                                    #
+# --------------------------------------------------------------------------- #
+
+S = TypeVar("S")  # State type
+A = TypeVar("A")  # Action type
+
 
 
 @runtime_checkable
@@ -69,18 +79,14 @@ class PolicyAgent(ABC):
         self,
         *,
         policy: PolicyProtocol,
-        n_states: int,
         n_actions: int,
         rng: Optional[Generator] = None,
         debug: bool = False,
     ) -> None:
         # ---- validate inputs -------------------------------------------------
-        if n_states <= 0:
-            raise ValueError("`n_states` must be a positive integer.")
         if n_actions <= 0:
             raise ValueError("`n_actions` must be a positive integer.")
 
-        self.n_states: int = n_states
         self.n_actions: int = n_actions
         self.debug: bool = debug
 

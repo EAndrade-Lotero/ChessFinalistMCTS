@@ -62,6 +62,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         other_player: PlayerProtocol[S, A],
         encoder: EncoderProtocol[S, A],
         *,
+        rng: Optional[Generator] = None,
         max_steps: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
@@ -78,21 +79,19 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
 
         self.max_steps = max_steps
         self._steps = 0
-        self._np_random: Generator = rng or default_rng()
+        self.rng: Generator = rng or default_rng()
         self._log = logger or logging.getLogger(__name__)
 
     # ------------------------------ Gym API -------------------------------- #
 
     def reset(
         self,
-        *,
-        seed: Optional[int] = None,
-        options: Optional[Dict[str, Any]] = None,
+        seed: Optional[int] = None
     ) -> Tuple[Any, Dict[str, Any]]:
         """Reset environment and opponent. Return (observation, info)."""
         super().reset(seed=seed)
         if seed is not None:
-            self._np_random = np.random.default_rng(seed)
+            self.rng = np.random.default_rng(seed)
 
         self.game = deepcopy(self._initial_game)
         self.state = self.game.initial_state
@@ -118,7 +117,6 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         domain_action: A = self._decode_action(action, valid_actions)
 
         # --- Agent move ---
-        current_player = self.game.player(self.state)
         try:
             new_state = self.game.result(self.state, domain_action)
         except Exception:
@@ -126,7 +124,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
             raise
 
         # Reward is for the *player who acted* in this transition
-        reward_first = self.game.utility(new_state, current_player)
+        reward_first = self.game.utility(new_state)
         reward: float = float(reward_first) if reward_first is not None else 0.0
         terminated = self.game.is_terminal(new_state)
         truncated = False
@@ -153,15 +151,6 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
                 self._log.exception("Error applying opponent action %r", opponent_action)
                 raise
 
-            # Now reward is with respect to the *opponent* who just acted
-            opponent_player = self.game.player(self.state=new_state)  # player to act next
-            # The utility we want is for the one who *just acted*, which is the opposite
-            # If your `utility` expects the actor, you may need to track it separately.
-            # Here we assume `utility(new_state, last_actor)`; last actor is *previous* player.
-            # Recover last actor by flipping:
-            last_actor = self._previous_player(opponent_player)
-            reward_second = self.game.utility(new_state, last_actor)
-            reward = float(reward_second) if reward_second is not None else 0.0
             terminated = self.game.is_terminal(new_state)
 
         # Bookkeeping
