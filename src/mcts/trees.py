@@ -170,7 +170,7 @@ class GameSearchTree:
 
         if not isinstance(rollout_policy, PolicyProtocol):
             raise TypeError(
-                "`game` must implement a Policy Protocol."
+                "`rollout_policy` must implement a Policy Protocol."
             )
         self.rollout_policy = rollout_policy
 
@@ -207,17 +207,31 @@ class GameSearchTree:
 
     def get_child_with_highest_ucb(self, node: SearchTreeNode) -> Any | None:
         """Pick the node's child with highest UCB"""
-        best_ucb = -np.inf
         multiplier = 1 if self.game.player(node.state) == 'white' else -1
+        print(f"Yo soy el multiplier {multiplier}")
+        best_ucb = -np.inf * multiplier
+        print(f"Por ahora soy el mejor: {best_ucb}")
         matches = []
         for child in node.children:
             ucb = child.ucb(self.total_playouts) * multiplier
-            if ucb > best_ucb:
-                best_ucb = ucb
-                matches = []
-            if ucb == best_ucb:
+            is_terminal = self.game.is_terminal(child.state)
+            print(f"Considerando accion {child.action} - ucb:{ucb} - terminal?:{is_terminal}")
+            if multiplier == 1:
+                if ucb > best_ucb:
+                    print(f"Este es el duro con {ucb=} > {best_ucb=}")
+                    best_ucb = ucb
+                    matches = []
+            elif multiplier == -1:
+                if ucb < best_ucb:
+                    print(f"Este es el duro con {ucb=} > {best_ucb=}")
+                    best_ucb = ucb
+                    matches = []
+            else:
+                raise Exception('WWWWWTTTTTTTTFFFFFFF')
+            if (ucb == best_ucb) and (not is_terminal):
                 matches.append(child)
         if len(matches) == 0:
+            raise Exception('WTF')
             return None
         best_child = self.rng.choice(matches)
         return best_child
@@ -317,22 +331,33 @@ class GameSearchTree:
     def _recursive_select_ucb(self, node: SearchTreeNode) -> SearchTreeNode | None:
         """Recursive search"""
 
-        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+        best_child = self.get_child_with_highest_ucb(node)
+        print(f"Hemos escogido la acción {best_child.action}")
 
-        for child in node.children:
-            if not self.game.is_terminal(child.state):
-                ucb = child.ucb(self.total_playouts) * multiplier
-                self._push_node(child, ucb)
+        if not best_child.is_fully_expanded():
+            print("This is the node!")
+            return best_child
+        else:
+            print("Entering recursion")
+            return self._recursive_select_ucb(best_child)
 
-        while len(self._frontier) > 0:
-            best_child = self._pop_best_node()
-            # print(f"Checking {best_child.action}...")
-            if not best_child.is_fully_expanded():
-                # print("This is the node!")
-                return best_child
-            else:
-                # print("Entering recursion")
-                return self._recursive_select_ucb(best_child)
+
+        # multiplier = 1 if self.game.player(node.state) == 'white' else -1
+
+        # for child in node.children:
+        #     if not self.game.is_terminal(child.state):
+        #         ucb = child.ucb(self.total_playouts) * multiplier
+        #         self._push_node(child, ucb)
+
+        # while len(self._frontier) > 0:
+        #     best_child = self._pop_best_node()
+        #     # print(f"Checking {best_child.action}...")
+        #     if not best_child.is_fully_expanded():
+        #         # print("This is the node!")
+        #         return best_child
+        #     else:
+        #         # print("Entering recursion")
+        #         return self._recursive_select_ucb(best_child)
         return None
 
     def backpropagate(self, node: SearchTreeNode, result: int) -> None:
@@ -349,7 +374,9 @@ class GameSearchTree:
             action = self.rollout_policy(state)
             state = self.game.result(state, action)
             counter += 1
-        return self.game.utility(state)
+        utility = self.game.utility(state)
+        if utility == 0: utility = -1
+        return utility
 
     # ---------------- The pipeline -------------------------------------- #
     def make_decision(self) -> Any | None:
