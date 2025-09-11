@@ -23,6 +23,8 @@ import pydot
 import numpy as np
 from numpy.random import Generator, default_rng
 
+from tqdm.auto import tqdm
+
 from pprint import pprint
 from itertools import count
 from collections import defaultdict
@@ -199,31 +201,31 @@ class GameSearchTree:
     # ---------------- public helper to pick the best root move ----------- #
     def get_best_root_action(self) -> Any | None:
         """Pick the root's action with highest UCB"""
-        best_child = self.get_child_with_highest_ucb(self.root)
+        best_child = self.get_child_with_highest_ucb(self.root, skip_terminals=False)
         if best_child is None:
             return None
         else:
             return best_child.action
 
-    def get_child_with_highest_ucb(self, node: SearchTreeNode) -> Any | None:
+    def get_child_with_highest_ucb(self, node: SearchTreeNode, skip_terminals: Optional[bool] = True) -> Any | None:
         """Pick the node's child with highest UCB"""
         multiplier = 1 if self.game.player(node.state) == 'white' else -1
-        print(f"Yo soy el multiplier {multiplier}")
+        print(f"{multiplier=}")
         best_ucb = -np.inf * multiplier
-        print(f"Por ahora soy el mejor: {best_ucb}")
         matches = []
+
+
         for child in node.children:
             ucb = child.ucb(self.total_playouts) * multiplier
             is_terminal = self.game.is_terminal(child.state)
-            print(f"Considerando accion {child.action} - ucb:{ucb} - terminal?:{is_terminal}")
+            if is_terminal and skip_terminals: continue
             if multiplier == 1:
                 if ucb > best_ucb:
-                    print(f"Este es el duro con {ucb=} > {best_ucb=}")
+                    print(f"{ucb=} --- {best_ucb}")
                     best_ucb = ucb
                     matches = []
             elif multiplier == -1:
                 if ucb < best_ucb:
-                    print(f"Este es el duro con {ucb=} > {best_ucb=}")
                     best_ucb = ucb
                     matches = []
             else:
@@ -332,13 +334,10 @@ class GameSearchTree:
         """Recursive search"""
 
         best_child = self.get_child_with_highest_ucb(node)
-        print(f"Hemos escogido la acción {best_child.action}")
 
         if not best_child.is_fully_expanded():
-            print("This is the node!")
             return best_child
         else:
-            print("Entering recursion")
             return self._recursive_select_ucb(best_child)
 
 
