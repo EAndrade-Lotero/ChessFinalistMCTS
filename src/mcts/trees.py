@@ -191,7 +191,7 @@ class GameSearchTree:
             try:
                 self._expand_root(root)
             except Exception as e:
-                print(f'A game state was expected, but something went wrong!')
+                """print(f'A game state was expected, but something went wrong!')"""
                 raise e
 
         # Frontier implemented with `heapq`
@@ -210,7 +210,7 @@ class GameSearchTree:
     def get_child_with_highest_ucb(self, node: SearchTreeNode, skip_terminals: Optional[bool] = True) -> Any | None:
         """Pick the node's child with highest UCB"""
         multiplier = 1 if self.game.player(node.state) == 'white' else -1
-        print(f"{multiplier=}")
+        """print(f"{multiplier=}")"""
         best_ucb = -np.inf * multiplier
         matches = []
 
@@ -221,7 +221,7 @@ class GameSearchTree:
             if is_terminal and skip_terminals: continue
             if multiplier == 1:
                 if ucb > best_ucb:
-                    print(f"{ucb=} --- {best_ucb}")
+                    """print(f"{ucb=} --- {best_ucb}")"""
                     best_ucb = ucb
                     matches = []
             elif multiplier == -1:
@@ -230,7 +230,8 @@ class GameSearchTree:
                     matches = []
             else:
                 raise Exception('WWWWWTTTTTTTTFFFFFFF')
-            if (ucb == best_ucb) and (not is_terminal):
+            if (ucb == best_ucb):
+                """if (not is_terminal) or (not skip_terminals):"""
                 matches.append(child)
         if len(matches) == 0:
             raise Exception('WTF')
