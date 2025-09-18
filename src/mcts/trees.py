@@ -73,6 +73,7 @@ class SearchTreeNode:
     def __init__(
         self,
         state: Any,
+        player: str,
         parent: "SearchTreeNode | None",
         action: "Any | None",
         untried_actions: List[Any],
@@ -80,6 +81,7 @@ class SearchTreeNode:
         ucb_constant: float
     ) -> None:
         self.state = state
+        self.player = player
         self.parent = parent
         self.action = action
         self.untried_actions = untried_actions
@@ -96,7 +98,11 @@ class SearchTreeNode:
         -------
         (root_action, updated_root_value)
         """
-        self.value.reward += result
+        if result == 1 and self.player == "white":
+            self.value.reward += result
+        elif result == -1 and self.player == "black":
+            self.value.reward -= result
+
         self.value.playouts += 1
 
         if self.depth() == 0:  # parent is the root
@@ -209,7 +215,8 @@ class GameSearchTree:
 
     def get_child_with_highest_ucb(self, node: SearchTreeNode, skip_terminals: Optional[bool] = True) -> Any | None:
         """Pick the node's child with highest UCB"""
-        multiplier = 1 if self.game.player(node.state) == 'white' else -1
+        multiplier = 1
+        """multiplier = 1 if self.game.player(node.state) == 'white' else -1"""
         """print(f"{multiplier=}")"""
         best_ucb = -np.inf * multiplier
         matches = []
@@ -262,12 +269,16 @@ class GameSearchTree:
         # Create new child
         new_state = self.game.result(node.state, action)
 
+        # Find player
+        player = self.game.player(new_state)
+
         untried_actions = self.game.actions(new_state)
         if len(untried_actions) > self.beam_width:
             untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
 
         child = SearchTreeNode(
             state=new_state,
+            player= player,
             parent=node,
             action=action,
             untried_actions=untried_actions,
@@ -282,6 +293,8 @@ class GameSearchTree:
         node.children.append(child)
 
     def _expand_root(self, state: Any) -> None:
+        # Find Player
+        player = self.game.player(state)
 
         # Get root actions
         actions = self.game.actions(state)
@@ -295,6 +308,7 @@ class GameSearchTree:
         # Root node
         self.root = SearchTreeNode(
             state=state,
+            player=player,
             parent=None,
             action=None,
             untried_actions=[],
@@ -304,13 +318,16 @@ class GameSearchTree:
 
         for a in self._root_actions:
             new_state = self.game.result(state, a)
+            # Find Player
+            player = self.game.player(new_state)
 
             untried_actions = self.game.actions(new_state)
             if len(untried_actions) > self.beam_width:
                 untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
 
             child = SearchTreeNode(
-                state=new_state, 
+                state=new_state,
+                player=player,
                 parent=self.root, 
                 action=a, 
                 untried_actions=untried_actions,
