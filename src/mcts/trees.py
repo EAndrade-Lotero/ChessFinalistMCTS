@@ -221,12 +221,17 @@ class GameSearchTree:
         best_ucb = -np.inf * multiplier
         matches = []
 
-
         for child in node.children:
             ucb = child.ucb(self.total_playouts) * multiplier
             is_terminal = self.game.is_terminal(child.state)
-            if is_terminal and skip_terminals: continue
-            if multiplier == 1:
+            if is_terminal and skip_terminals: 
+                continue
+            elif not self.has_non_terminal_children(child):
+                for grandchild in child.children:
+                    result = self.game.utility(grandchild.state)
+                    self.backpropagate(grandchild, result)
+                continue
+            elif multiplier == 1:
                 if ucb > best_ucb:
                     """print(f"{ucb=} --- {best_ucb}")"""
                     best_ucb = ucb
@@ -245,7 +250,14 @@ class GameSearchTree:
             return None
         best_child = self.rng.choice(matches)
         return best_child
-    
+
+    def has_non_terminal_children(self, node: SearchTreeNode) -> bool:
+        non_terminal_children = [child for child in node.children if not self.game.is_terminal(child.state)]        
+        if len(non_terminal_children) > 0:
+            return True
+        else:
+            return False
+
     def get_root_child_from_action(self, action):
         for child in self.root.children:
             if action == child.action:
