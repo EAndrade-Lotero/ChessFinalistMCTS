@@ -50,7 +50,7 @@ class PriorityQueue(Generic[T]):
     - Stable for equal priorities (insertion order preserved).
     """
 
-    def __init__(self, *, max_heap: bool = False) -> None:
+    def __init__(self, *, max_heap: bool = True) -> None:
         self._heap: list[tuple[int | float, int, T]] = []
         self._counter = itertools.count()  # tie-breaker for stability
         self._sign = -1 if max_heap else 1
@@ -143,10 +143,22 @@ class SearchTreeNode:
         -------
         (root_action, updated_root_value)
         """
-        if result == 1 and self.player == "white":
-            self.value.reward += result
-        elif result == -1 and self.player == "black":
-            self.value.reward -= result
+        if self.player == "white":
+            #If Player is white, black has just played
+            if result == 1:
+                #Black Lost
+                pass
+            elif result == -1:
+                #Black Won
+                self.value.reward -= result
+        elif self.player == "black":
+            #If Player is black, white has just played
+            if result == 1:
+                #White Won
+                self.value.reward += result
+            elif result == -1:
+                #White Lost
+                pass
 
         self.value.playouts += 1
 
@@ -423,6 +435,9 @@ class GameSearchTree:
         """Recursive search"""
 
         best_child = self.get_child_with_highest_ucb(node)
+        if best_child is None:
+            print(f"{node.state}")
+            raise Exception(f"Ooops, no ucb selection from node\n{node}")
 
         if not best_child.is_fully_expanded():
             return best_child
@@ -472,10 +487,10 @@ class GameSearchTree:
         while counter < self.n_iterations:
 
             # Step 1: Node selection
-            node = self.select_ucb()
+            node = self.get_child_with_highest_ucb(self.root)
             if node is None:
                 raise Exception(f"Ooops, no ucb selection from node\n{node}")
-            if node.is_fully_expanded():
+            elif node.is_fully_expanded():
                 raise Exception(f"Ooops, no expansion from node\n{node}")
 
             # Step 2: Expansion
