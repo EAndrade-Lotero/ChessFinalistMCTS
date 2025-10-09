@@ -32,6 +32,51 @@ from typing import Any, Callable, Dict, List, Tuple, Set, Optional
 
 from agents.base_classes import PolicyProtocol, GameProtocol
 
+
+import heapq
+import itertools
+from typing import Generic, TypeVar, Tuple
+
+T = TypeVar("T")
+
+# --------------------------------------------------------------------------- #
+#                           0.  Priority Queue                                #
+# --------------------------------------------------------------------------- #
+class PriorityQueue(Generic[T]):
+    """
+    Minimal priority queue backed by heapq.
+
+    - Min-heap by default; pass max_heap=True for max-heap behavior.
+    - Stable for equal priorities (insertion order preserved).
+    """
+
+    def __init__(self, *, max_heap: bool = False) -> None:
+        self._heap: list[tuple[int | float, int, T]] = []
+        self._counter = itertools.count()  # tie-breaker for stability
+        self._sign = -1 if max_heap else 1
+
+    def push(self, priority: int | float, item: T) -> None:
+        """Insert (priority, item)."""
+        heapq.heappush(self._heap, (self._sign * priority, next(self._counter), item))
+
+    def pop(self) -> Tuple[int | float, T]:
+        """
+        Remove and return the (priority, item) with best priority.
+        Raises IndexError if empty.
+        """
+        if not self._heap:
+            raise IndexError("pop from empty PriorityQueue")
+        p, _, item = heapq.heappop(self._heap)
+        return (self._sign * p, item)
+
+    # (Optional niceties)
+    def __len__(self) -> int:  # allows: len(pq)
+        return len(self._heap)
+
+    def __bool__(self) -> bool:  # allows: if pq:
+        return bool(self._heap)
+
+
 # --------------------------------------------------------------------------- #
 #                           1.  Node statistics                               #
 # --------------------------------------------------------------------------- #
@@ -221,35 +266,49 @@ class GameSearchTree:
         best_ucb = -np.inf * multiplier
         matches = []
 
+        # Create priority queue with children
+        children = PriorityQueue()
         for child in node.children:
             ucb = child.ucb(self.total_playouts) * multiplier
+            children.push(ucb, child)
+
+        child = None
+        while child is None and children:
+            best_ucb, child = children.pop()
             is_terminal = self.game.is_terminal(child.state)
             if is_terminal and skip_terminals: 
-                continue
-            elif not self.has_non_terminal_children(child):
-                for grandchild in child.children:
-                    result = self.game.utility(grandchild.state)
-                    self.backpropagate(grandchild, result)
-                continue
-            elif multiplier == 1:
-                if ucb > best_ucb:
-                    """print(f"{ucb=} --- {best_ucb}")"""
-                    best_ucb = ucb
-                    matches = []
-            elif multiplier == -1:
-                if ucb < best_ucb:
-                    best_ucb = ucb
-                    matches = []
-            else:
-                raise Exception('WWWWWTTTTTTTTFFFFFFF')
-            if (ucb == best_ucb):
-                """if (not is_terminal) or (not skip_terminals):"""
-                matches.append(child)
-        if len(matches) == 0:
-            raise Exception('WTF')
-            return None
-        best_child = self.rng.choice(matches)
-        return best_child
+                child = None
+
+        return child
+
+        #     ucb = child.ucb(self.total_playouts) * multiplier
+        #     is_terminal = self.game.is_terminal(child.state)
+        #     if is_terminal and skip_terminals: 
+        #         continue
+        #     elif not self.has_non_terminal_children(child):
+        #         for grandchild in child.children:
+        #             result = self.game.utility(grandchild.state)
+        #             self.backpropagate(grandchild, result)
+        #         continue
+        #     elif multiplier == 1:
+        #         if ucb > best_ucb:
+        #             """print(f"{ucb=} --- {best_ucb}")"""
+        #             best_ucb = ucb
+        #             matches = []
+        #     elif multiplier == -1:
+        #         if ucb < best_ucb:
+        #             best_ucb = ucb
+        #             matches = []
+        #     else:
+        #         raise Exception('WWWWWTTTTTTTTFFFFFFF')
+        #     if (ucb == best_ucb):
+        #         """if (not is_terminal) or (not skip_terminals):"""
+        #         matches.append(child)
+        # if len(matches) == 0:
+        #     raise Exception('WTF')
+        #     return None
+        # best_child = self.rng.choice(matches)
+        # return best_child
 
     def has_non_terminal_children(self, node: SearchTreeNode) -> bool:
         non_terminal_children = [child for child in node.children if not self.game.is_terminal(child.state)]        
