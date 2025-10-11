@@ -490,6 +490,10 @@ class GameSearchTree:
 
     # ---------------- The pipeline -------------------------------------- #
     def make_decision(self) -> Any | None:
+
+        if self.root.is_finished():
+            return self.get_best_root_action()
+        
         counter = 0
         while counter < self.n_iterations:
 
@@ -511,9 +515,8 @@ class GameSearchTree:
 
             counter += 1
 
-        # Show best action
-        best_root_action = self.get_best_root_action()  
-        return best_root_action      
+        # Get best action
+        return self.get_best_root_action()  
   
     # ---------------- visualization helpers -------------------------------- #   
     def to_pydot(self) -> pydot.Dot:
