@@ -89,7 +89,8 @@ class NodeValue:
         self.playouts: int = playouts
 
     def __str__(self) -> str:  # For quick debugging prints
-        return f"{self.reward}/{self.playouts}"
+        value = self.reward/self.playouts if self.playouts != 0 else 0
+        return f"{self.reward}/{self.playouts} (={value})"
 
 
 # --------------------------------------------------------------------------- #
@@ -174,14 +175,14 @@ class SearchTreeNode:
         """Upper-Confidence Bound value used for selection."""
         exploration = (
             np.sqrt(np.log(total_visits + 1) / (self.value.playouts + 1))
-            if total_visits
+            if total_visits > 0
             else 1.0
         )
         return self.mean_value() + self.ucb_constant * exploration
 
     def mean_value(self) -> float:
         return (
-            self.value.reward / self.value.playouts if self.value.playouts else 0.0
+            self.value.reward / self.value.playouts if self.value.playouts > 0 else 0.0
         )
 
     # ------------- utility --------------------------------------------- #
@@ -275,7 +276,14 @@ class GameSearchTree:
     # ---------------- public helper to pick the best root move ----------- #
     def get_best_root_action(self) -> Any | None:
         """Pick the root's action with highest UCB"""
-        best_child = self.get_child_with_highest_ucb(self.root, skip_finished=False)
+
+        # Create priority queue with children
+        children = PriorityQueue()
+        for child in self.root.children:
+            ucb = child.mean_value()
+            children.push(ucb, child)
+
+        _, best_child = children.pop()
         if best_child is None:
             return None
         else:
