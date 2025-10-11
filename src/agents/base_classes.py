@@ -79,7 +79,7 @@ class PolicyAgent(ABC):
         self,
         *,
         policy: PolicyProtocol,
-        n_actions: int,
+        action_encoder: int,
         rng: Optional[Generator] = None,
         debug: bool = False,
     ) -> None:

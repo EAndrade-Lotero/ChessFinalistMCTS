@@ -35,12 +35,11 @@ class ChessEncoder(EncoderProtocol):
 
     def __init__(
         self,
-        n_actions: int,
-        obs_shape: Tuple[int, ...],
-        obs_low: float = -1.0,
-        obs_high: float = 1.0,
     ) -> None:
         # Define observation space (continuous)
+        obs_low: float = -1.0
+        obs_high: float = 1.0
+        obs_shape: Tuple[int, ...] = (84, 84)
         self.observation_space = spaces.Box(
             low=obs_low,
             high=obs_high,
@@ -49,47 +48,12 @@ class ChessEncoder(EncoderProtocol):
         )
 
         # Define action space (discrete)
+        n_actions: int = 64 * 63
         self.action_space = spaces.Discrete(n_actions)
 
     # ----------------------------- State Encoding -------------------------- #
 
-    def encode_obs(self, state: chess.Board) -> np.ndarray:
-        """
-        Encode a domain-specific state into a numpy observation.
-
-        Expected: state is convertible into a float32 numpy array
-        with shape matching `obs_shape`.
-
-        Example: if state is already a numpy array → just cast dtype.
-        """
-        obs = self.state_to_numpy(state)
-        return obs
-
-    # ----------------------------- Action Encoding ------------------------- #
-
-    def encode_action(self, action: Any) -> int:
-        """
-        Encode a domain action into an int usable by Gym.
-
-        If your domain actions are already integers, this is identity.
-        Otherwise, you might map them into an index.
-        """
-        if isinstance(action, (int, np.integer)):
-            return int(action)
-        raise ValueError(f"Cannot encode non-integer action: {action}")
-
-    def decode_action(self, action: int, valid_actions: Sequence[Any]) -> Any:
-        """
-        Decode a Gym action (int index) into a domain action.
-
-        By default, returns valid_actions[action].
-        """
-        if not (0 <= action < len(valid_actions)):
-            raise ValueError(f"Action {action} out of bounds for {len(valid_actions)} choices")
-        return valid_actions[action]
-    
-    @staticmethod
-    def state_to_numpy(board: chess.Board) -> np.ndarray:
+    def encode_obs(self, board: chess.Board) -> np.ndarray:
         """
         Return board as a NumPy array from SVG image.
 
@@ -118,4 +82,30 @@ class ChessEncoder(EncoderProtocol):
         arr = np.asarray(img)
 
         # 5) normalization
-        return (arr.astype(np.float32) / 255.0).flatten()
+        arr = (arr.astype(np.float32) / 255.0)
+
+        return arr
+
+    # ----------------------------- Action Encoding ------------------------- #
+
+    def encode_action(self, action: Any) -> int:
+        """
+        Encode a domain action into an int usable by Gym.
+
+        If your domain actions are already integers, this is identity.
+        Otherwise, you might map them into an index.
+        """
+        if isinstance(action, (int, np.integer)):
+            return int(action)
+        raise ValueError(f"Cannot encode non-integer action: {action}")
+
+    def decode_action(self, action: int, valid_actions: Sequence[Any]) -> Any:
+        """
+        Decode a Gym action (int index) into a domain action.
+
+        By default, returns valid_actions[action].
+        """
+        if not (0 <= action < len(valid_actions)):
+            raise ValueError(f"Action {action} out of bounds for {len(valid_actions)} choices")
+        return valid_actions[action]
+    

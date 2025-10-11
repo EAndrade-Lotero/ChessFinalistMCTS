@@ -5,6 +5,7 @@ Beam-width–limited Monte-Carlo Tree Search
 
 Contents
 --------
+0. PriorityQueue    - efficient implementation of a priority queue
 1. NodeValue        – cumulative reward / simulations container
 2. SearchTreeNode   – one node in the MCTS tree, with UCB support
 3. GameSearchTree   – the search algorithm itself (uses `heapq`)
@@ -46,7 +47,7 @@ class PriorityQueue(Generic[T]):
     """
     Minimal priority queue backed by heapq.
 
-    - Min-heap by default; pass max_heap=True for max-heap behavior.
+    - Max-heap by default; pass max_heap=False for min-heap behavior.
     - Stable for equal priorities (insertion order preserved).
     """
 
@@ -133,6 +134,7 @@ class SearchTreeNode:
         self.value = value
         self.ucb_constant = ucb_constant
         self.children = []
+        self.finished = False
         
     # ------------- Monte-Carlo helpers ---------------------------------- #
     def backpropagate(self, result: int) -> Tuple[Any, NodeValue]:
@@ -185,10 +187,21 @@ class SearchTreeNode:
     # ------------- utility --------------------------------------------- #
     def depth(self) -> int:
         return 0 if self.parent is None else 1 + self.parent.depth()
+    
+    def get_action_history(self) -> List[str]:
+        if self.parent is None:
+            return []
+        else:
+            return self.parent.get_action_history() + [str(self.action)]
 
     def is_fully_expanded(self) -> bool:
         return len(self.untried_actions) == 0
         
+    def is_finished(self) -> bool:
+        if not self.is_fully_expanded():
+            return False
+        return np.all([child.finished for child in self.children])
+
     def __str__(self) -> str:
         root_flag = "--root--" if self.parent is None else ""
         s = f"State {root_flag}\n{self.state}\nDepth: {self.depth()}\n"
@@ -257,20 +270,21 @@ class GameSearchTree:
                 """print(f'A game state was expected, but something went wrong!')"""
                 raise e
 
-        # Frontier implemented with `heapq`
-        self._frontier: List[Tuple[float, int, SearchTreeNode]] = []
-        self._counter = 0  # tie-breaker for equal priorities
-
     # ---------------- public helper to pick the best root move ----------- #
     def get_best_root_action(self) -> Any | None:
         """Pick the root's action with highest UCB"""
-        best_child = self.get_child_with_highest_ucb(self.root, skip_terminals=False)
+        best_child = self.get_child_with_highest_ucb(self.root, skip_finished=False)
         if best_child is None:
             return None
         else:
             return best_child.action
 
-    def get_child_with_highest_ucb(self, node: SearchTreeNode, skip_terminals: Optional[bool] = True) -> Any | None:
+    def get_child_with_highest_ucb(
+        self, 
+        node: SearchTreeNode, 
+        skip_finished: Optional[bool] = True,
+        skip_terminals: Optional[bool] = True,
+    ) -> Any | None:
         """Pick the node's child with highest UCB"""
         multiplier = 1
         """multiplier = 1 if self.game.player(node.state) == 'white' else -1"""
@@ -284,12 +298,17 @@ class GameSearchTree:
             ucb = child.ucb(self.total_playouts) * multiplier
             children.push(ucb, child)
 
+        # Iterate to find child with best ucb with conditions
         child = None
         while child is None and children:
             best_ucb, child = children.pop()
             is_terminal = self.game.is_terminal(child.state)
-            if is_terminal and skip_terminals: 
+            # if is_terminal and skip_terminals: 
+            #     child = None
+            #     continue
+            if child.is_finished() and skip_finished:
                 child = None
+                continue
 
         return child
 
@@ -339,7 +358,8 @@ class GameSearchTree:
     def expand_node(self, node: SearchTreeNode) -> None:
         """Expand node with rollout policy"""
 
-        assert(not node.is_fully_expanded()), f"Error: Node cannot be expanded!\n{node}"
+        assert(not node.is_fully_expanded()), f"Error: Node is fully expanded and cannot be expanded!\n{node}"
+        assert(not node.finished), f"Error: Node is finished and cannot be expanded!\n{node}"
 
         # Choose an action according to rollout policy
         probabilities_untried_actions = self.rollout_policy.predict_in_list(node.state, node.untried_actions)
@@ -370,10 +390,12 @@ class GameSearchTree:
         )
 
         if self.game.is_terminal(child.state):
+            child.finished = True
             result = self.game.utility(child.state)
             self.backpropagate(child, result)
 
         node.children.append(child)
+        node.finished = node.is_finished()
 
     def _expand_root(self, state: Any) -> None:
         # Find Player
@@ -419,6 +441,7 @@ class GameSearchTree:
             )
 
             if self.game.is_terminal(child.state):
+                child.finished = True
                 result = self.game.utility(child.state)
                 self.backpropagate(child, result)
 
@@ -434,34 +457,18 @@ class GameSearchTree:
     def _recursive_select_ucb(self, node: SearchTreeNode) -> SearchTreeNode | None:
         """Recursive search"""
 
-        best_child = self.get_child_with_highest_ucb(node)
+        best_child = self.get_child_with_highest_ucb(
+            node=node, 
+            skip_finished=True
+        )
         if best_child is None:
             print(f"{node.state}")
-            raise Exception(f"Ooops, no ucb selection from node\n{node}")
+            raise Exception(f"Ooops, didn't find usable best child from node\n{node}\nThe action history is:\n{node.get_action_history()}")
 
         if not best_child.is_fully_expanded():
             return best_child
         else:
             return self._recursive_select_ucb(best_child)
-
-
-        # multiplier = 1 if self.game.player(node.state) == 'white' else -1
-
-        # for child in node.children:
-        #     if not self.game.is_terminal(child.state):
-        #         ucb = child.ucb(self.total_playouts) * multiplier
-        #         self._push_node(child, ucb)
-
-        # while len(self._frontier) > 0:
-        #     best_child = self._pop_best_node()
-        #     # print(f"Checking {best_child.action}...")
-        #     if not best_child.is_fully_expanded():
-        #         # print("This is the node!")
-        #         return best_child
-        #     else:
-        #         # print("Entering recursion")
-        #         return self._recursive_select_ucb(best_child)
-        return None
 
     def backpropagate(self, node: SearchTreeNode, result: int) -> None:
         """Update stats and rebuild frontier priorities after each playout."""
@@ -487,11 +494,11 @@ class GameSearchTree:
         while counter < self.n_iterations:
 
             # Step 1: Node selection
-            node = self.get_child_with_highest_ucb(self.root)
+            node = self.select_ucb()
             if node is None:
-                raise Exception(f"Ooops, no ucb selection from node\n{node}")
+                raise Exception(f"Ooops, no ucb selection from node\n{node}\n{node.get_action_history()}")
             elif node.is_fully_expanded():
-                raise Exception(f"Ooops, no expansion from node\n{node}")
+                raise Exception(f"Ooops, no expansion from node\n{node}\n{node.get_action_history()}\n{node.parent}")
 
             # Step 2: Expansion
             self.expand_node(node)
@@ -507,16 +514,7 @@ class GameSearchTree:
         # Show best action
         best_root_action = self.get_best_root_action()  
         return best_root_action      
-
-    # ---------------- heap helpers -------------------------------------- #
-    def _push_node(self, node: SearchTreeNode, priority: float) -> None:
-        heapq.heappush(self._frontier, (-priority, self._counter, node))
-        self._counter -= 1
-
-    def _pop_best_node(self) -> SearchTreeNode:
-        _, _, node = heapq.heappop(self._frontier)
-        return node
-    
+  
     # ---------------- visualization helpers -------------------------------- #   
     def to_pydot(self) -> pydot.Dot:
         """Return a pydot graph representing the current search tree."""
@@ -529,7 +527,8 @@ class GameSearchTree:
             msg = f"Value={node.value}\n"
             msg += f"To play={player}\n"
             msg += f"UCB={node.ucb(self.total_playouts):.2f}\n"
-            msg += f"Finished={node.is_fully_expanded()}\n"
+            msg += f"Fully expanded={node.is_fully_expanded()}\n"
+            msg += f"Finished={node.finished}\n"
             msg += f"Terminal={self.game.is_terminal(node.state)}"
             if node.action is None:
                 msg = "root\n" + msg
