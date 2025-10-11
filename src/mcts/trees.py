@@ -198,6 +198,8 @@ class SearchTreeNode:
         return len(self.untried_actions) == 0
         
     def is_finished(self) -> bool:
+        if self.finished:
+            return True
         if not self.is_fully_expanded():
             return False
         return np.all([child.finished for child in self.children])
@@ -358,8 +360,8 @@ class GameSearchTree:
     def expand_node(self, node: SearchTreeNode) -> None:
         """Expand node with rollout policy"""
 
-        assert(not node.is_fully_expanded()), f"Error: Node is fully expanded and cannot be expanded!\n{node}"
-        assert(not node.finished), f"Error: Node is finished and cannot be expanded!\n{node}"
+        assert(not node.is_fully_expanded()), f"Error: Node is fully expanded and cannot be expanded!\n{node}\n{node.get_action_history()}"
+        assert(not node.finished), f"Error: Node is finished and cannot be expanded!\n{node}\n{node.get_action_history()}"
 
         # Choose an action according to rollout policy
         probabilities_untried_actions = self.rollout_policy.predict_in_list(node.state, node.untried_actions)
@@ -467,8 +469,9 @@ class GameSearchTree:
 
         if not best_child.is_fully_expanded():
             return best_child
-        else:
-            return self._recursive_select_ucb(best_child)
+        elif best_child.is_finished():
+            return None
+        return self._recursive_select_ucb(best_child)
 
     def backpropagate(self, node: SearchTreeNode, result: int) -> None:
         """Update stats and rebuild frontier priorities after each playout."""
@@ -502,7 +505,9 @@ class GameSearchTree:
             if node is None:
                 raise Exception(f"Ooops, no ucb selection from node\n{node}\n{node.get_action_history()}")
             elif node.is_fully_expanded():
-                raise Exception(f"Ooops, no expansion from node\n{node}\n{node.get_action_history()}\n{node.parent}")
+                raise Exception(f"Ooops, no expansion from node\n{node}\n{node.get_action_history()}")
+            elif node.is_finished():
+                raise Exception(f"Ooops, finished node not for expansion\n{node}\n{node.get_action_history()}")
 
             # Step 2: Expansion
             self.expand_node(node)
