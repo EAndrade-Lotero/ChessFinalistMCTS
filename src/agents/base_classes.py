@@ -67,9 +67,9 @@ class EncoderProtocol(Protocol, Generic[S, A]):
 
     def encode_obs(self, state: S) -> Any: ...
     # If action is already primitive (int), this can be identity:
-    def encode_action(self, action: A) -> Any: ...
+    def encode_action(self, state: S, action: A) -> Any: ...
     # If you need to map int→domain action:
-    def decode_action(self, action: Any, valid_actions: Sequence[A]) -> A: ...
+    def decode_action(self, state: S, action: Any) -> A: ...
 
 
 class PolicyAgent(ABC):
@@ -79,6 +79,7 @@ class PolicyAgent(ABC):
         self,
         *,
         policy: PolicyProtocol,
+        n_actions: int,
         action_encoder: int,
         rng: Optional[Generator] = None,
         debug: bool = False,

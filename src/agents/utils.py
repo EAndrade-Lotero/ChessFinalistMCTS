@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-import chess
-import cairosvg
+# import chess
+# import cairosvg
+
 import numpy as np
+
+from games.chambon_chess import Board
+
 
 from PIL import Image
 from io import BytesIO
@@ -53,7 +57,7 @@ class ChessEncoder(EncoderProtocol):
 
     # ----------------------------- State Encoding -------------------------- #
 
-    def encode_obs(self, board: chess.Board) -> np.ndarray:
+    def encode_obs(self, board: Board) -> np.ndarray:
         """
         Return board as a NumPy array from SVG image.
 
@@ -69,26 +73,28 @@ class ChessEncoder(EncoderProtocol):
         size = 84
         mode = 'L'
 
-        # 1) Build SVG string from python-chess
-        svg_str = chess.svg.board(board, size=size)
+        # # 1) Build SVG string from python-chess
+        # svg_str = chess.svg.board(board, size=size)
 
-        # 2) Convert SVG → PNG bytes
-        png_bytes = cairosvg.svg2png(bytestring=svg_str.encode("utf-8"))
+        # # 2) Convert SVG → PNG bytes
+        # png_bytes = cairosvg.svg2png(bytestring=svg_str.encode("utf-8"))
 
-        # 3) Load PNG bytes into a Pillow image and convert mode
-        img = Image.open(BytesIO(png_bytes)).convert(mode)
+        # # 3) Load PNG bytes into a Pillow image and convert mode
+        # img = Image.open(BytesIO(png_bytes)).convert(mode)
 
-        # 4) Convert to NumPy array
-        arr = np.asarray(img)
+        # # 4) Convert to NumPy array
+        # arr = np.asarray(img)
 
-        # 5) normalization
-        arr = (arr.astype(np.float32) / 255.0)
+        # # 5) normalization
+        # arr = (arr.astype(np.float32) / 255.0)
 
-        return arr
+        # return arr
+
+        return str(board)
 
     # ----------------------------- Action Encoding ------------------------- #
 
-    def encode_action(self, action: Any) -> int:
+    def encode_action(self, board: Board, action: Any) -> int:
         """
         Encode a domain action into an int usable by Gym.
 
