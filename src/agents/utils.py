@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from games.chambon_chess import Board
+from games.chambon_chess import Board, Move
 
 
 from PIL import Image
@@ -37,6 +37,46 @@ class ChessEncoder(EncoderProtocol):
         Maximum value for observation space.
     """
 
+    dict_codificacion_rey = {
+        (-1, -1): 0,
+        (-1, 0): 1,
+        (-1, 1): 2,
+        (0, -1): 3,
+        (0, 1): 4,
+        (1, -1): 5,
+        (1, 0): 6,
+        (1, 1): 7,
+    }
+    dict_codificacion_torre = {
+        (0, -7): 0,
+        (0, -6): 1,
+        (0, -5): 2,
+        (0, -4): 3,
+        (0, -3): 4,
+        (0, -2): 5,
+        (0, -1): 6,
+        (0, 1): 7,
+        (0, 2): 8,
+        (0, 3): 9,
+        (0, 4): 10,
+        (0, 5): 11,
+        (0, 6): 12,
+        (0, 7): 13,
+        (7, 0): 14,
+        (6, 0): 15,
+        (5, 0): 16,
+        (4, 0): 17,
+        (3, 0): 18,
+        (2, 0): 19,
+        (1, 0): 20,
+        (-1, 0): 21,
+        (-2, 0): 22,
+        (-3, 0): 23,
+        (-4, 0): 24,
+        (-5, 0): 25,
+        (-6, 0): 26,
+        (-7, 0): 27,
+    }
     def __init__(
         self,
     ) -> None:
@@ -90,7 +130,16 @@ class ChessEncoder(EncoderProtocol):
 
         # return arr
 
-        return str(board)
+        tablero = str(board)
+        t1 = tablero.split('\n')
+        t1 = [linea.replace('k', '1') for linea in t1]
+        t1 = [linea.replace('K', '2') for linea in t1]
+        t1 = [linea.replace('R', '3') for linea in t1]
+        t1 = [linea.replace('.', '0') for linea in t1]
+        t1 = [linea.split(' ') for linea in t1]
+        t1 = [[int(x) for x in linea] for linea in t1]
+        t1 = np.array(t1)
+        return t1
 
     # ----------------------------- Action Encoding ------------------------- #
 
@@ -101,9 +150,55 @@ class ChessEncoder(EncoderProtocol):
         If your domain actions are already integers, this is identity.
         Otherwise, you might map them into an index.
         """
-        if isinstance(action, (int, np.integer)):
-            return int(action)
-        raise ValueError(f"Cannot encode non-integer action: {action}")
+        if not isinstance(action, Move):
+            raise ValueError(f"Cannot encode non-integer action: {action}")
+        if not isinstance(board, Board):
+            raise ValueError(f"board should be of type Board (got {type(board)} instead.")
+    
+        coded_board = self.encode_obs(board)
+        salida, llegada = self.casillas_desde_hasta(action)
+        pieza = coded_board[salida]
+        diferencia = np.array(llegada) - np.array(salida)
+        one_hot_rey_negro = np.zeros(8)
+        one_hot_rey_blanco = np.zeros(8)
+        one_hot_torre = np.zeros(28)
+
+        if pieza == 1:
+            accion_rey = self.dict_codificacion_rey[tuple(diferencia)]
+            one_hot_rey_negro[accion_rey] = 1
+        elif pieza == 2:
+            accion_rey = self.dict_codificacion_rey[tuple(diferencia)]
+            one_hot_rey_blanco[accion_rey] = 1
+        elif pieza == 3:
+            accion_torre = self.dict_codificacion_torre[tuple(diferencia)]
+            one_hot_torre[accion_torre] = 1
+        else:
+            raise ValueError(f"Pieza incorrecta. Se esperaba 1, 2 o 3 (pero se obtuvo {pieza})")
+
+        one_hot = np.concat([one_hot_rey_negro, one_hot_rey_blanco, one_hot_torre])
+        return one_hot
+        
+    def casillas_desde_hasta(self, action: Move) -> Tuple[int, int]:
+        print(f"{action=}")
+
+        coded_index = action.from_square
+        print(f"{coded_index=}")
+        from_index_pair = np.unravel_index(coded_index, (8,8))
+        fila, columna = from_index_pair
+        fila = 7 - fila
+        from_index_pair = (fila, columna)
+
+        coded_index = action.to_square
+        print(f"{coded_index=}")
+        to_index_pair = np.unravel_index(coded_index, (8,8))
+        fila, columna = to_index_pair
+        fila = 7 - fila
+        to_index_pair = (fila, columna)
+
+        casillas = [from_index_pair, to_index_pair]
+        return casillas
+
+
 
     def decode_action(self, action: int, valid_actions: Sequence[Any]) -> Any:
         """
