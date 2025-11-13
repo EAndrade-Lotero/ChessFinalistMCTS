@@ -36,7 +36,7 @@ class ChessEncoder(EncoderProtocol):
     obs_high : float, default=1.0
         Maximum value for observation space.
     """
-
+    rangos = np.array([0, 8, 16, 44])
     dict_codificacion_rey = {
         (-1, -1): 0,
         (-1, 0): 1,
@@ -47,6 +47,9 @@ class ChessEncoder(EncoderProtocol):
         (1, 0): 6,
         (1, 1): 7,
     }
+    list_codificacion_rey = [
+        (-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)
+    ]
     dict_codificacion_torre = {
         (0, -7): 0,
         (0, -6): 1,
@@ -77,6 +80,12 @@ class ChessEncoder(EncoderProtocol):
         (-6, 0): 26,
         (-7, 0): 27,
     }
+    list_codificacion_torre = [
+        (0, -7), (0, -6), (0, -5), (0, -4), (0, -3), (0, -2), (0, -1), 
+        (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), 
+        (7, 0), (6, 0), (5, 0), (4, 0), (3, 0), (2, 0), (1, 0), 
+        (-1, 0), (-2, 0), (-3, 0), (-4, 0), (-5, 0), (-6, 0), (-7, 0)
+    ]
     def __init__(
         self,
     ) -> None:
@@ -200,13 +209,34 @@ class ChessEncoder(EncoderProtocol):
 
 
 
-    def decode_action(self, action: int, valid_actions: Sequence[Any]) -> Any:
+    def decode_action(self, board: Board, action: Any) -> Any:
         """
         Decode a Gym action (int index) into a domain action.
 
         By default, returns valid_actions[action].
         """
-        if not (0 <= action < len(valid_actions)):
-            raise ValueError(f"Action {action} out of bounds for {len(valid_actions)} choices")
-        return valid_actions[action]
+        bin_idx = np.digitize(action, self.rangos)
+        obs = self.encode_obs(board)
+        fila, columna = np.where(obs == bin_idx)
+        assert(0 <= columna[0] < 8)
+        assert(0 <= fila[0] < 8)
+        casilla_desde = f"{chr(columna[0] + 97)}{8 - fila[0]}"
+        offset = self.rangos[bin_idx - 1]
+        indice_pieza = action - offset 
+        if bin_idx in [1, 2]:
+            fila_mas, columna_mas = self.list_codificacion_rey[indice_pieza]
+        elif bin_idx in [3]:
+            fila_mas, columna_mas = self.list_codificacion_torre[indice_pieza]
+        else:
+            print(bin_idx)
+            raise ValueError
+        casilla_hasta_ = (fila + fila_mas, columna + columna_mas)
+        fila, columna = casilla_hasta_
+        print(f"{casilla_hasta_=}")
+        assert(0 <= columna < 8)
+        assert(0 <= fila < 8)
+        casilla_hasta =  f"{chr(columna[0] + 97)}{8 - fila[0]}"
+        print(casilla_hasta)
+        algebraico = f"{casilla_desde}{casilla_hasta}"
+        return Move.from_uci(algebraico)
     
