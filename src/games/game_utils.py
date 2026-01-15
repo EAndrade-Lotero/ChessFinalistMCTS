@@ -174,15 +174,15 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
 
     # ---------------------------- Internals --------------------------------- #
 
-    def _decode_action(self, action_any: Any, valid_actions: Sequence[A]) -> A:
+    def _decode_action(self, action: Any, valid_actions: Sequence[A]) -> A:
         """
         Decode an external (e.g., int) action into a domain action using the encoder.
         If the encoder has a `decode_action`, use it; else assume the action is already A.
         """
         if hasattr(self.encoder, "decode_action"):
             # type: ignore[attr-defined]
-            return self.encoder.decode_action(action_any, valid_actions)  # type: ignore[return-value]
-        # Fallback: assume action_any is already a valid domain action
+            return self.encoder.decode_action(self.state, action)  # type: ignore[return-value]
+        # Fallback: assume action is already a valid domain action
         return action_any  # type: ignore[return-value]
 
     @staticmethod

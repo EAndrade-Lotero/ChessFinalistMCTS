@@ -23,11 +23,11 @@ Author: <your-name>
 from __future__ import annotations
 
 import copy
-# import chess
-# import chess.svg
-# import cairosvg
+import chess
+import chess.svg
+import cairosvg
 
-import games.chambon_chess as chess
+# import games.chambon_chess as chess
 
 import numpy as np
 

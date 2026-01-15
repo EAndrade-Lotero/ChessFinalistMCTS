@@ -5,14 +5,13 @@ class RandomAgent(PolicyAgent):
     def __init__(
         self, 
         policy, 
-        n_actions, 
         action_encoder: int,        
         rng = None, 
         debug = False
     ) -> None:
         super().__init__(
             policy=policy, 
-            n_actions=n_actions,
+            n_actions=action_encoder.n_actions,
             action_encoder=action_encoder, 
             rng=rng, 
             debug=debug

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from games.chambon_chess import Board, Move
+from chess import Board, Move
 
 
 from PIL import Image
@@ -37,6 +37,7 @@ class ChessEncoder(EncoderProtocol):
         Maximum value for observation space.
     """
     rangos = np.array([0, 8, 16, 44])
+    n_actions: int = 44  # 44 possible actions
     dict_codificacion_rey = {
         (-1, -1): 0,
         (-1, 0): 1,
@@ -86,6 +87,7 @@ class ChessEncoder(EncoderProtocol):
         (7, 0), (6, 0), (5, 0), (4, 0), (3, 0), (2, 0), (1, 0), 
         (-1, 0), (-2, 0), (-3, 0), (-4, 0), (-5, 0), (-6, 0), (-7, 0)
     ]
+
     def __init__(
         self,
     ) -> None:
@@ -101,8 +103,7 @@ class ChessEncoder(EncoderProtocol):
         )
 
         # Define action space (discrete)
-        n_actions: int = 64 * 63
-        self.action_space = spaces.Discrete(n_actions)
+        self.action_space = spaces.Discrete(self.n_actions)
 
     # ----------------------------- State Encoding -------------------------- #
 
