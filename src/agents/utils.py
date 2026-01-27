@@ -11,7 +11,7 @@ from chess import Board, Move
 from PIL import Image
 from io import BytesIO
 from gymnasium import spaces
-from typing import Any, Sequence, Tuple, Protocol
+from typing import Any, Sequence, Tuple, Protocol, Union
 
 from agents.base_classes import EncoderProtocol
 
@@ -36,6 +36,12 @@ class ChessEncoder(EncoderProtocol):
     obs_high : float, default=1.0
         Maximum value for observation space.
     """
+    dict_pieces = {
+        1: 'k',  # black king
+        2: 'K',  # white king
+        3: 'R',  # white rook
+        0: 1,
+    }
     rangos = np.array([0, 8, 16, 44])
     n_actions: int = 44  # 44 possible actions
     dict_codificacion_rey = {
@@ -151,6 +157,44 @@ class ChessEncoder(EncoderProtocol):
         t1 = np.array(t1)
         return t1
 
+    
+    def decode_obs(self, observation: np.ndarray) -> Board:
+        """
+        Decode a NumPy array observation back into a chess.Board.
+
+        Parameters
+        ----------
+        observation : np.ndarray
+            Observation array.
+
+        Returns
+        -------
+        chess.Board
+            Decoded board state.
+        """
+        def process_row(row: np.ndarray) -> str:
+            row_string = ''
+            sum_empty = 0
+            for x in row:
+                if x not in [0, 1, 2, 3]:
+                    raise ValueError(f"Invalid value {x} in observation array.")
+                val = self.dict_pieces[x]
+                if val == 1:
+                    sum_empty += 1
+                else:
+                    if sum_empty > 0:
+                        row_string += str(sum_empty) 
+                        sum_empty = 0
+                    row_string += val
+            if sum_empty > 0:
+                row_string += str(sum_empty) 
+            return row_string
+
+        t1 = [process_row(row) for row in observation]
+        fen_suffix = " w"
+        board = '/'.join(t1) + fen_suffix
+        return Board(board)
+    
     # ----------------------------- Action Encoding ------------------------- #
 
     def encode_action(self, board: Board, action: Any) -> int:
@@ -208,8 +252,6 @@ class ChessEncoder(EncoderProtocol):
         casillas = [from_index_pair, to_index_pair]
         return casillas
 
-
-
     def decode_action(self, board: Board, action: Any) -> Any:
         """
         Decode a Gym action (int index) into a domain action.
@@ -234,8 +276,8 @@ class ChessEncoder(EncoderProtocol):
         casilla_hasta_ = (fila + fila_mas, columna + columna_mas)
         fila, columna = casilla_hasta_
         print(f"{casilla_hasta_=}")
-        assert(0 <= columna < 8)
-        assert(0 <= fila < 8)
+        assert(0 <= columna < 8), f"{columna=}"
+        assert(0 <= fila < 8), f"{fila=}"
         casilla_hasta =  f"{chr(columna[0] + 97)}{8 - fila[0]}"
         print(casilla_hasta)
         algebraico = f"{casilla_desde}{casilla_hasta}"

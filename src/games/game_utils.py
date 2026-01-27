@@ -142,6 +142,8 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
                     self._log.debug("Could not update other_player.choices", exc_info=True)
 
             opponent_action = self.other_player.make_decision()
+            opponent_action = self.encoder.encode_action(opponent_action)
+
             if getattr(self.other_player, "debug", False):
                 self._log.debug("Opponent plays: %r", opponent_action)
 
@@ -183,7 +185,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
             # type: ignore[attr-defined]
             return self.encoder.decode_action(self.state, action)  # type: ignore[return-value]
         # Fallback: assume action is already a valid domain action
-        return action_any  # type: ignore[return-value]
+        return action  # type: ignore[return-value]
 
     @staticmethod
     def _previous_player(next_player: Any) -> Any:
