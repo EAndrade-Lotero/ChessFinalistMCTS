@@ -79,16 +79,16 @@ class PolicyAgent(ABC):
         self,
         *,
         policy: PolicyProtocol,
-        n_actions: int,
-        action_encoder: int,
+        n_actions: Optional[None | int] = None,
         rng: Optional[Generator] = None,
         debug: bool = False,
     ) -> None:
         # ---- validate inputs -------------------------------------------------
-        if n_actions <= 0:
+        
+        if n_actions is not None and n_actions <= 0:
             raise ValueError("`n_actions` must be a positive integer.")
 
-        self.n_actions: int = n_actions
+        self.n_actions: None | int = n_actions
         self.debug: bool = debug
 
         # ---- policy ----------------------------------------------------------
@@ -113,14 +113,16 @@ class PolicyAgent(ABC):
             state = self.states[-1]
 
         probs = self._policy.predict(state)
-
+        
+        if self.n_actions is None:
+            n_actions = len(probs)
         if self.debug:
-            if probs.ndim != 1 or probs.size != self.n_actions:
+            if probs.ndim != 1 or probs.size != n_actions:
                 raise ValueError("`predict` must return a 1-D array of length `n_actions`.")
             if not np.isclose(probs.sum(), 1.0):
                 raise ValueError("Action probabilities must sum to 1.")
 
-        return int(self.rng.choice(self.n_actions, p=probs))
+        return int(self.rng.choice(n_actions, p=probs))
 
     @abstractmethod
     def update(

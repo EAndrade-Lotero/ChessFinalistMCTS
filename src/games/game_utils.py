@@ -140,9 +140,10 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
                     self.other_player.choices = self.game.actions(new_state)  # type: ignore[attr-defined]
                 except Exception:
                     self._log.debug("Could not update other_player.choices", exc_info=True)
-
+            
             opponent_action = self.other_player.make_decision()
-            opponent_action = self.encoder.encode_action(opponent_action)
+            print(f"{opponent_action=}")
+            opponent_action = self.encoder.encode_action(new_state, opponent_action)
 
             if getattr(self.other_player, "debug", False):
                 self._log.debug("Opponent plays: %r", opponent_action)
@@ -162,7 +163,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
             truncated = True
 
-        obs = self.encoder.encode_obs(self.state)
+        obs, player = self.encoder.encode_obs(self.state)
         info: Dict[str, Any] = {}
         if opponent_action is not None:
             info["opponent_action"] = self.encoder.encode_action(opponent_action)

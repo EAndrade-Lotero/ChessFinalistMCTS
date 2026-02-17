@@ -10,3 +10,4 @@ stable_baselines3==2.6.0
 torch==2.7.0
 tqdm==4.67.1
 typing_extensions==4.15.0
+chess==1.11.2

@@ -4,19 +4,20 @@ class RandomAgent(PolicyAgent):
 
     def __init__(
         self, 
-        policy, 
-        action_encoder: int,        
-        rng = None, 
+        policy,
+        rng = None,
         debug = False
     ) -> None:
         super().__init__(
-            policy=policy, 
-            n_actions=action_encoder.n_actions,
-            action_encoder=action_encoder, 
-            rng=rng, 
+            policy=policy,  
+            rng=rng,
+            n_actions = None,
             debug=debug
         )
 
     def update(self, next_state, reward, done):
         """Do nothing"""
         return
+
+    def super_make_decision():
+        pass

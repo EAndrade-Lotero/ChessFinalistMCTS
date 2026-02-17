@@ -113,7 +113,7 @@ class ChessEncoder(EncoderProtocol):
 
     # ----------------------------- State Encoding -------------------------- #
 
-    def encode_obs(self, board: Board) -> np.ndarray:
+    def encode_obs(self, board: Board) -> Tuple[np.ndarray, str]:
         """
         Return board as a NumPy array from SVG image.
 
@@ -155,10 +155,11 @@ class ChessEncoder(EncoderProtocol):
         t1 = [linea.split(' ') for linea in t1]
         t1 = [[int(x) for x in linea] for linea in t1]
         t1 = np.array(t1)
-        return t1
+        turn = 'w' if board.turn else 'b'
+        return (t1, turn)
 
     
-    def decode_obs(self, observation: np.ndarray) -> Board:
+    def decode_obs(self, observation: Tuple[np.ndarray, str]) -> Board:
         """
         Decode a NumPy array observation back into a chess.Board.
 
@@ -189,9 +190,9 @@ class ChessEncoder(EncoderProtocol):
             if sum_empty > 0:
                 row_string += str(sum_empty) 
             return row_string
-
-        t1 = [process_row(row) for row in observation]
-        fen_suffix = " w"
+        board, player = observation
+        t1 = [process_row(row) for row in board]
+        fen_suffix = f" {player}"
         board = '/'.join(t1) + fen_suffix
         return Board(board)
     
@@ -209,7 +210,7 @@ class ChessEncoder(EncoderProtocol):
         if not isinstance(board, Board):
             raise ValueError(f"board should be of type Board (got {type(board)} instead.")
     
-        coded_board = self.encode_obs(board)
+        coded_board, player = self.encode_obs(board)
         salida, llegada = self.casillas_desde_hasta(action)
         pieza = coded_board[salida]
         diferencia = np.array(llegada) - np.array(salida)
@@ -259,7 +260,7 @@ class ChessEncoder(EncoderProtocol):
         By default, returns valid_actions[action].
         """
         bin_idx = np.digitize(action, self.rangos)
-        obs = self.encode_obs(board)
+        obs, player = self.encode_obs(board)
         fila, columna = np.where(obs == bin_idx)
         assert(0 <= columna[0] < 8)
         assert(0 <= fila[0] < 8)
