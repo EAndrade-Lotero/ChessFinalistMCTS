@@ -145,8 +145,15 @@ class ChessEncoder(EncoderProtocol):
         # arr = (arr.astype(np.float32) / 255.0)
 
         # return arr
+        
+        def _norm_array(x):
+            mu = x.mean(axis=0, keepdims=True)
+            sigma = x.std(axis=0, keepdims=True)
+            z = np.divide(x - mu, sigma, out=np.zeros_like(x), where=sigma != 0)
+            return z
 
         tablero = str(board)
+        
         t1 = tablero.split('\n')
         t1 = [linea.replace('k', '1') for linea in t1]
         t1 = [linea.replace('K', '2') for linea in t1]
@@ -154,10 +161,11 @@ class ChessEncoder(EncoderProtocol):
         t1 = [linea.replace('.', '0') for linea in t1]
         t1 = [linea.split(' ') for linea in t1]
         t1 = [[int(x) for x in linea] for linea in t1]
-        t1 = np.array(t1)
+        t1 = np.array(t1).flatten()
+        #t1 = _norm_array(t1)
         turn = 'w' if board.turn else 'b'
         return (t1, turn)
-
+    
     
     def decode_obs(self, observation: Tuple[np.ndarray, str]) -> Board:
         """
@@ -191,6 +199,7 @@ class ChessEncoder(EncoderProtocol):
                 row_string += str(sum_empty) 
             return row_string
         board, player = observation
+        board = board.reshape((8,8))
         t1 = [process_row(row) for row in board]
         fen_suffix = f" {player}"
         board = '/'.join(t1) + fen_suffix
@@ -206,11 +215,13 @@ class ChessEncoder(EncoderProtocol):
         Otherwise, you might map them into an index.
         """
         if not isinstance(action, Move):
-            raise ValueError(f"Cannot encode non-integer action: {action}")
+            raise ValueError(f"Action should be a move: {action}")
         if not isinstance(board, Board):
             raise ValueError(f"board should be of type Board (got {type(board)} instead.")
     
         coded_board, player = self.encode_obs(board)
+        coded_board = coded_board.reshape((8,8))
+        print(f'encode_action - coded_board\n {coded_board}')
         salida, llegada = self.casillas_desde_hasta(action)
         pieza = coded_board[salida]
         diferencia = np.array(llegada) - np.array(salida)
@@ -234,17 +245,13 @@ class ChessEncoder(EncoderProtocol):
         return one_hot
         
     def casillas_desde_hasta(self, action: Move) -> Tuple[int, int]:
-        print(f"{action=}")
-
         coded_index = action.from_square
-        print(f"{coded_index=}")
         from_index_pair = np.unravel_index(coded_index, (8,8))
         fila, columna = from_index_pair
         fila = 7 - fila
         from_index_pair = (fila, columna)
 
         coded_index = action.to_square
-        print(f"{coded_index=}")
         to_index_pair = np.unravel_index(coded_index, (8,8))
         fila, columna = to_index_pair
         fila = 7 - fila
@@ -261,12 +268,13 @@ class ChessEncoder(EncoderProtocol):
         """
         bin_idx = np.digitize(action, self.rangos)
         obs, player = self.encode_obs(board)
+        obs = obs.reshape((8,8))
         fila, columna = np.where(obs == bin_idx)
         assert(0 <= columna[0] < 8)
         assert(0 <= fila[0] < 8)
         casilla_desde = f"{chr(columna[0] + 97)}{8 - fila[0]}"
         offset = self.rangos[bin_idx - 1]
-        indice_pieza = action - offset 
+        indice_pieza = action - offset
         if bin_idx in [1, 2]:
             fila_mas, columna_mas = self.list_codificacion_rey[indice_pieza]
         elif bin_idx in [3]:
@@ -276,11 +284,9 @@ class ChessEncoder(EncoderProtocol):
             raise ValueError
         casilla_hasta_ = (fila + fila_mas, columna + columna_mas)
         fila, columna = casilla_hasta_
-        print(f"{casilla_hasta_=}")
         assert(0 <= columna < 8), f"{columna=}"
         assert(0 <= fila < 8), f"{fila=}"
         casilla_hasta =  f"{chr(columna[0] + 97)}{8 - fila[0]}"
-        print(casilla_hasta)
         algebraico = f"{casilla_desde}{casilla_hasta}"
         return Move.from_uci(algebraico)
     
