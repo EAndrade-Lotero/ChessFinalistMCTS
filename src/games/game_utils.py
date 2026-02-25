@@ -9,6 +9,8 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
+from chess import Move
+
 from agents.base_classes import (
     GameProtocol, PlayerProtocol, EncoderProtocol
 )
@@ -106,7 +108,13 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         obs = self.encoder.encode_obs(self.state)
         info: Dict[str, Any] = {}
         return obs, info
-
+    
+    def _index2uci(self, action_index: int) -> Move:
+        valid_actions = [str(action) for action in self.game.actions(self.state)]
+        action = self._decode_action(action_index)
+        assert str(action) in valid_actions, f"Action {action} is not a valid action."
+        return action
+    
     def step(self, action: Any) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """
         Apply agent action, then (if needed) the opponent action.
@@ -115,9 +123,13 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         # Decode action into domain action if needed
         print(f'player start moved: {self.game.player(self.state)}')
         print('Decode action into domain')
-        valid_actions = self.game.actions(self.state)
-        domain_action: A = self._decode_action(action, valid_actions)
-        print(f'{valid_actions=}')
+        try:
+            domain_action = self._index2uci(action)
+        except:
+            truncated = False
+            if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
+                truncated = True
+            return self.state, -10, False, truncated, {}
         print(f'{domain_action=}')
 
         # --- Agent move ---
@@ -193,7 +205,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
 
     # ---------------------------- Internals --------------------------------- #
 
-    def _decode_action(self, action: Any, valid_actions: Sequence[A]) -> A:
+    def _decode_action(self, action: Any) -> A:
         """
         Decode an external (e.g., int) action into a domain action using the encoder.
         If the encoder has a `decode_action`, use it; else assume the action is already A.

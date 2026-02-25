@@ -57,42 +57,6 @@ class ChessEncoder(EncoderProtocol):
     list_codificacion_rey = [
         (-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)
     ]
-    dict_codificacion_torre = {
-        (0, -7): 0,
-        (0, -6): 1,
-        (0, -5): 2,
-        (0, -4): 3,
-        (0, -3): 4,
-        (0, -2): 5,
-        (0, -1): 6,
-        (0, 1): 7,
-        (0, 2): 8,
-        (0, 3): 9,
-        (0, 4): 10,
-        (0, 5): 11,
-        (0, 6): 12,
-        (0, 7): 13,
-        (7, 0): 14,
-        (6, 0): 15,
-        (5, 0): 16,
-        (4, 0): 17,
-        (3, 0): 18,
-        (2, 0): 19,
-        (1, 0): 20,
-        (-1, 0): 21,
-        (-2, 0): 22,
-        (-3, 0): 23,
-        (-4, 0): 24,
-        (-5, 0): 25,
-        (-6, 0): 26,
-        (-7, 0): 27,
-    }
-    list_codificacion_torre = [
-        (0, -7), (0, -6), (0, -5), (0, -4), (0, -3), (0, -2), (0, -1), 
-        (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), 
-        (7, 0), (6, 0), (5, 0), (4, 0), (3, 0), (2, 0), (1, 0), 
-        (-1, 0), (-2, 0), (-3, 0), (-4, 0), (-5, 0), (-6, 0), (-7, 0)
-    ]
 
     def __init__(
         self,
@@ -260,27 +224,41 @@ class ChessEncoder(EncoderProtocol):
         casillas = [from_index_pair, to_index_pair]
         return casillas
 
-    def decode_action(self, board: Board, action: Any) -> Any:
+    def decode_action(self, board: Board, action: int) -> Move:
         """
         Decode a Gym action (int index) into a domain action.
 
         By default, returns valid_actions[action].
         """
-        bin_idx = np.digitize(action, self.rangos)
+        pieza_a_mover = np.digitize(action, self.rangos)
         obs, player = self.encode_obs(board)
         obs = obs.reshape((8,8))
-        fila, columna = np.where(obs == bin_idx)
+        
+        print(f"{pieza_a_mover=}")
+        print(f"{self.rangos=}")
+        print(obs)
+        print(f"{np.where(obs == pieza_a_mover)=}")
+        
+        fila, columna = np.where(obs == pieza_a_mover)
         assert(0 <= columna[0] < 8)
         assert(0 <= fila[0] < 8)
         casilla_desde = f"{chr(columna[0] + 97)}{8 - fila[0]}"
-        offset = self.rangos[bin_idx - 1]
+        casilla_desde_tuple = (columna[0], fila[0])
+        
+        print(f"{casilla_desde=}")
+        
+        offset = self.rangos[pieza_a_mover - 1]
         indice_pieza = action - offset
-        if bin_idx in [1, 2]:
+        
+        print(f"{offset=}")
+        print(f"{indice_pieza=}")
+        print(f"{ChessEncoder._get_list_acciones_torre(casilla_desde_tuple)=}")
+        if pieza_a_mover in [1, 2]:
             fila_mas, columna_mas = self.list_codificacion_rey[indice_pieza]
-        elif bin_idx in [3]:
+        elif pieza_a_mover in [3]:
             fila_mas, columna_mas = self.list_codificacion_torre[indice_pieza]
         else:
-            print(bin_idx)
+            print(pieza_a_mover)
             raise ValueError
         casilla_hasta_ = (fila + fila_mas, columna + columna_mas)
         fila, columna = casilla_hasta_
@@ -290,3 +268,11 @@ class ChessEncoder(EncoderProtocol):
         algebraico = f"{casilla_desde}{casilla_hasta}"
         return Move.from_uci(algebraico)
     
+    @staticmethod
+    def _get_list_acciones_torre(casilla_desde: Tuple[int, int]) -> List[Tuple[int,int]]:
+        i, j = casilla_desde
+        x_list = [(k,0) for k in range(-i,8-i)]
+        y_list = [(0,k) for k in range(-j,8-j)]
+        list_acciones = x_list + y_list
+        list_acciones = [pareja for pareja in list_acciones if pareja != (0,0)]
+        return list_acciones
