@@ -27,7 +27,11 @@ import chess
 import chess.svg
 import cairosvg
 
+<<<<<<< HEAD
 #import games.chambon_chess as chess
+=======
+# import games.chambon_chess as chess
+>>>>>>> main
 
 import numpy as np
 

@@ -21,17 +21,27 @@ class GameUniformPolicy(PolicyProtocol):
     rng
         `numpy.random.Generator` used for sampling.  If *None*, the policy
         creates an independent generator via `default_rng()`.
+    encoder : EncoderProtocol, optional
+        An optional state and action encoder.
     """
 
     __slots__ = ("_game",)
 
-    def __init__(self, game: GameProtocol, rng: Optional[Generator] = None) -> None:
+    def __init__(
+        self, 
+        game: GameProtocol, 
+        encoder: Optional[Any] = None,
+        rng: Optional[Generator] = None
+    ) -> None:
         if not isinstance(game, GameProtocol):
             raise TypeError(
                 "`game` must implement the `actions(state) -> Sequence` interface."
             )
         self._game: GameProtocol = game
         self._rng: Generator = rng or default_rng()
+        if encoder is not None:
+            assert hasattr(encoder, "n_actions"), "`encoder` must have an `n_actions` attribute."
+        self.encoder = encoder
 
     # ------------------------------ CALL ------------------------------------
     def __call__(self, state: Any) -> Any:
@@ -46,10 +56,16 @@ class GameUniformPolicy(PolicyProtocol):
     # ---------------------------------------------------------------- API
     def predict(self, state: Any) -> NDArray[np.floating]:
         """Return a uniform probability vector over actions available in *state*."""
-        actions = self._game.actions(state)
-        n_actions: int = len(actions)
+        
+        if self.encoder is not None:
+            n_actions = self.encoder.n_actions
+        else:
+            actions = self._game.actions(state)
+            n_actions: int = len(actions)
+
         if n_actions == 0:
             raise ValueError("No available actions for the given state.")
+
         return np.full(n_actions, 1.0 / n_actions, dtype=float)
 
     def predict_in_list(

@@ -9,6 +9,8 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
+from chess import Move
+
 from agents.base_classes import (
     GameProtocol, PlayerProtocol, EncoderProtocol
 )
@@ -106,19 +108,36 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         obs = self.encoder.encode_obs(self.state)
         info: Dict[str, Any] = {}
         return obs, info
-
+    
+    def _index2uci(self, action_index: int) -> Move:
+        valid_actions = [str(action) for action in self.game.actions(self.state)]
+        action = self._decode_action(action_index)
+        assert str(action) in valid_actions, f"Action {action} is not a valid action."
+        return action
+    
     def step(self, action: Any) -> Tuple[Any, float, bool, bool, Dict[str, Any]]:
         """
         Apply agent action, then (if needed) the opponent action.
         Returns (obs, reward, terminated, truncated, info).
         """
         # Decode action into domain action if needed
-        valid_actions = self.game.actions(self.state)
-        domain_action: A = self._decode_action(action, valid_actions)
+        print(f'player start moved: {self.game.player(self.state)}')
+        print('Decode action into domain')
+        try:
+            domain_action = self._index2uci(action)
+        except:
+            truncated = False
+            if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
+                truncated = True
+            return self.state, -10, False, truncated, {}
+        print(f'{domain_action=}')
 
         # --- Agent move ---
+        print('Agent move')
         try:
+            print(f'agent_state:\n {self.state}')
             new_state = self.game.result(self.state, domain_action)
+            print(f'new_state:\n{new_state}')
         except Exception:
             self._log.exception("Error applying agent action %r in state %r", action, self.state)
             raise
@@ -129,6 +148,8 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         terminated = self.game.is_terminal(new_state)
         truncated = False
         opponent_action: Optional[A] = None
+        
+        print(f'Player reward:\n {reward=}\n{terminated=}')
 
         # --- Opponent move (if not terminal) ---
         if not terminated:
@@ -140,13 +161,23 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
                     self.other_player.choices = self.game.actions(new_state)  # type: ignore[attr-defined]
                 except Exception:
                     self._log.debug("Could not update other_player.choices", exc_info=True)
-
-            opponent_action = self.other_player.make_decision()
+            
+            opponent_action_idx = self.other_player.make_decision()
+            action_list = self.game.actions(new_state)
+            opponent_action = action_list[opponent_action_idx]
+            print(f"opponent action from list: {opponent_action}")
+            #opponent_action = self.encoder.encode_action(new_state, opponent_action)
+            #print(f"encode opponent action: {opponent_action}")
+            
             if getattr(self.other_player, "debug", False):
                 self._log.debug("Opponent plays: %r", opponent_action)
 
             try:
+                print(f'New state before opponent action: {new_state}')
+                print(f'Player on new state:\n {self.game.player(new_state)}')
+                print(f'action to be taken: {opponent_action}')
                 new_state = self.game.result(new_state, opponent_action)
+                print(f'state after opponent action:\n {new_state}')
             except Exception:
                 self._log.exception("Error applying opponent action %r", opponent_action)
                 raise
@@ -160,10 +191,10 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
             truncated = True
 
-        obs = self.encoder.encode_obs(self.state)
+        obs, player = self.encoder.encode_obs(self.state)
         info: Dict[str, Any] = {}
         if opponent_action is not None:
-            info["opponent_action"] = self.encoder.encode_action(opponent_action)
+            info["opponent_action"] = opponent_action
         return obs, reward, terminated, truncated, info
 
     def render(self) -> None:
@@ -174,16 +205,16 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
 
     # ---------------------------- Internals --------------------------------- #
 
-    def _decode_action(self, action_any: Any, valid_actions: Sequence[A]) -> A:
+    def _decode_action(self, action: Any) -> A:
         """
         Decode an external (e.g., int) action into a domain action using the encoder.
         If the encoder has a `decode_action`, use it; else assume the action is already A.
         """
         if hasattr(self.encoder, "decode_action"):
             # type: ignore[attr-defined]
-            return self.encoder.decode_action(action_any, valid_actions)  # type: ignore[return-value]
-        # Fallback: assume action_any is already a valid domain action
-        return action_any  # type: ignore[return-value]
+            return self.encoder.decode_action(self.state, action)  # type: ignore[return-value]
+        # Fallback: assume action is already a valid domain action
+        return action  # type: ignore[return-value]
 
     @staticmethod
     def _previous_player(next_player: Any) -> Any:
