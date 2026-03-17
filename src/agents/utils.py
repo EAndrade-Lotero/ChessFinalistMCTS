@@ -11,7 +11,7 @@ from chess import Board, Move
 from PIL import Image
 from io import BytesIO
 from gymnasium import spaces
-from typing import Any, Sequence, Tuple, Protocol, Union
+from typing import Any, Sequence, Tuple, Protocol, Union, List
 
 from agents.base_classes import EncoderProtocol
 
@@ -42,8 +42,8 @@ class ChessEncoder(EncoderProtocol):
         3: 'R',  # white rook
         0: 1,
     }
-    rangos = np.array([0, 8, 16, 44])
-    n_actions: int = 44  # 44 possible actions
+    rangos = np.array([0, 8, 16, 30])
+    n_actions: int = 30  # 30 possible actions
     dict_codificacion_rey = {
         (-1, -1): 0,
         (-1, 0): 1,
@@ -230,6 +230,8 @@ class ChessEncoder(EncoderProtocol):
 
         By default, returns valid_actions[action].
         """
+        assert(action < 30), f"Error: action {action} is not valid. It should be less than 30."
+        
         pieza_a_mover = np.digitize(action, self.rangos)
         obs, player = self.encode_obs(board)
         obs = obs.reshape((8,8))
@@ -256,7 +258,8 @@ class ChessEncoder(EncoderProtocol):
         if pieza_a_mover in [1, 2]:
             fila_mas, columna_mas = self.list_codificacion_rey[indice_pieza]
         elif pieza_a_mover in [3]:
-            fila_mas, columna_mas = self.list_codificacion_torre[indice_pieza]
+            list_codificacion_torre = self._get_list_acciones_torre(casilla_desde_tuple)
+            fila_mas, columna_mas = list_codificacion_torre[indice_pieza]
         else:
             print(pieza_a_mover)
             raise ValueError
@@ -271,8 +274,8 @@ class ChessEncoder(EncoderProtocol):
     @staticmethod
     def _get_list_acciones_torre(casilla_desde: Tuple[int, int]) -> List[Tuple[int,int]]:
         i, j = casilla_desde
-        x_list = [(k,0) for k in range(-i,8-i)]
-        y_list = [(0,k) for k in range(-j,8-j)]
+        x_list = [(0,k) for k in range(-i,8-i)]
+        y_list = [(k,0) for k in range(-j,8-j)]
         list_acciones = x_list + y_list
         list_acciones = [pareja for pareja in list_acciones if pareja != (0,0)]
         return list_acciones
