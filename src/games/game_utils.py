@@ -106,6 +106,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         self.other_player.states.append(self.state)
 
         obs = self.encoder.encode_obs(self.state)
+        obs = self.encoder.to_array(obs)
         info: Dict[str, Any] = {}
         return obs, info
     
@@ -121,23 +122,25 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         Returns (obs, reward, terminated, truncated, info).
         """
         # Decode action into domain action if needed
-        print(f'player start moved: {self.game.player(self.state)}')
-        print('Decode action into domain')
+        # print(f'player start moved: {self.game.player(self.state)}')
+        # print('Decode action into domain')
         try:
             domain_action = self._index2uci(action)
         except:
             truncated = False
             if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
                 truncated = True
-            return self.state, -10, False, truncated, {}
-        print(f'{domain_action=}')
+            obs = self.encoder.encode_obs(self.state)
+            obs = self.encoder.to_array(obs)
+            return obs, -10, False, truncated, {}
+        # print(f'{domain_action=}')
 
         # --- Agent move ---
-        print('Agent move')
+        # print('Agent move')
         try:
-            print(f'agent_state:\n {self.state}')
+            # print(f'agent_state:\n {self.state}')
             new_state = self.game.result(self.state, domain_action)
-            print(f'new_state:\n{new_state}')
+            # print(f'new_state:\n{new_state}')
         except Exception:
             self._log.exception("Error applying agent action %r in state %r", action, self.state)
             raise
@@ -149,7 +152,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         truncated = False
         opponent_action: Optional[A] = None
         
-        print(f'Player reward:\n {reward=}\n{terminated=}')
+        # print(f'Player reward:\n {reward=}\n{terminated=}')
 
         # --- Opponent move (if not terminal) ---
         if not terminated:
@@ -165,7 +168,7 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
             opponent_action_idx = self.other_player.make_decision()
             action_list = self.game.actions(new_state)
             opponent_action = action_list[opponent_action_idx]
-            print(f"opponent action from list: {opponent_action}")
+            # print(f"opponent action from list: {opponent_action}")
             #opponent_action = self.encoder.encode_action(new_state, opponent_action)
             #print(f"encode opponent action: {opponent_action}")
             
@@ -173,11 +176,11 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
                 self._log.debug("Opponent plays: %r", opponent_action)
 
             try:
-                print(f'New state before opponent action: {new_state}')
-                print(f'Player on new state:\n {self.game.player(new_state)}')
-                print(f'action to be taken: {opponent_action}')
+                # print(f'New state before opponent action: {new_state}')
+                # print(f'Player on new state:\n {self.game.player(new_state)}')
+                # print(f'action to be taken: {opponent_action}')
                 new_state = self.game.result(new_state, opponent_action)
-                print(f'state after opponent action:\n {new_state}')
+                # print(f'state after opponent action:\n {new_state}')
             except Exception:
                 self._log.exception("Error applying opponent action %r", opponent_action)
                 raise
@@ -191,7 +194,8 @@ class GymEnvFromGameAndPlayer2(gym.Env, Generic[S, A]):
         if self.max_steps is not None and self._steps >= self.max_steps and not terminated:
             truncated = True
 
-        obs, player = self.encoder.encode_obs(self.state)
+        obs = self.encoder.encode_obs(self.state)
+        obs = self.encoder.to_array(obs)
         info: Dict[str, Any] = {}
         if opponent_action is not None:
             info["opponent_action"] = opponent_action

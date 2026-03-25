@@ -3,6 +3,7 @@ from __future__ import annotations
 # import chess
 # import cairosvg
 
+import torch
 import numpy as np
 
 from chess import Board, Move
@@ -65,9 +66,9 @@ class ChessEncoder(EncoderProtocol):
         self,
     ) -> None:
         # Define observation space (continuous)
-        obs_low: float = -1.0
-        obs_high: float = 1.0
-        obs_shape: Tuple[int, ...] = (84, 84)
+        obs_low: float = -np.inf
+        obs_high: float = np.inf
+        obs_shape: Tuple[int, ...] = (65, )
         self.observation_space = spaces.Box(
             low=obs_low,
             high=obs_high,
@@ -82,43 +83,8 @@ class ChessEncoder(EncoderProtocol):
 
     def encode_obs(self, board: Board) -> Tuple[np.ndarray, str]:
         """
-        Return board as a NumPy array from SVG image.
-
-        Parameters
-        ----------
-        board : chess.Board
-
-        Returns
-        -------
-        np.ndarray
-            Shape (size, size, C) for RGB/RGBA or (size, size) for 'L'.
+        Return board as a NumPy array from chess Board.
         """
-        size = 84
-        mode = 'L'
-
-        # # 1) Build SVG string from python-chess
-        # svg_str = chess.svg.board(board, size=size)
-
-        # # 2) Convert SVG → PNG bytes
-        # png_bytes = cairosvg.svg2png(bytestring=svg_str.encode("utf-8"))
-
-        # # 3) Load PNG bytes into a Pillow image and convert mode
-        # img = Image.open(BytesIO(png_bytes)).convert(mode)
-
-        # # 4) Convert to NumPy array
-        # arr = np.asarray(img)
-
-        # # 5) normalization
-        # arr = (arr.astype(np.float32) / 255.0)
-
-        # return arr
-        
-        def _norm_array(x):
-            mu = x.mean(axis=0, keepdims=True)
-            sigma = x.std(axis=0, keepdims=True)
-            z = np.divide(x - mu, sigma, out=np.zeros_like(x), where=sigma != 0)
-            return z
-
         tablero = str(board)
         
         t1 = tablero.split('\n')
@@ -133,6 +99,22 @@ class ChessEncoder(EncoderProtocol):
         turn = 'w' if board.turn else 'b'
         return (t1, turn)
     
+    @staticmethod
+    def _norm_array(x):
+        x = x.astype(np.float32)
+        mu = x.mean(axis=0, keepdims=True)
+        sigma = x.std(axis=0, keepdims=True)
+        z = np.divide(x - mu, sigma, out=np.zeros_like(x), where=sigma != 0)
+        return z
+    
+    def to_array(self, observation: Tuple[np.ndarray, str]) -> torch.Tensor:
+        array, player = observation
+
+        if player == 'w':
+            array = np.concat([array, np.ones(1)])
+        else:
+            array = np.concat([array, np.zeros(1)])
+        return ChessEncoder._norm_array(array)
     
     def decode_obs(self, observation: Tuple[np.ndarray, str]) -> Board:
         """
@@ -191,10 +173,11 @@ class ChessEncoder(EncoderProtocol):
     
         coded_board, player = self.encode_obs(board)
         coded_board = coded_board.reshape((8,8))
-        print(f'encode_action - coded_board\n {coded_board}')
+        # print(f'encode_action - coded_board\n {coded_board}')
         salida, llegada = self.casillas_desde_hasta(action)
         pieza = coded_board[salida]
         diferencia = np.array(llegada) - np.array(salida)
+        diferencia = tuple(diferencia)
         one_hot_rey_negro = np.zeros(8)
         one_hot_rey_blanco = np.zeros(8)
         one_hot_torre = np.zeros(14)
@@ -207,10 +190,9 @@ class ChessEncoder(EncoderProtocol):
             one_hot_rey_blanco[accion_rey] = 1
         elif pieza == 3:
             dict_codificacion_torre = self._get_dict_codificacion_torre(action)
-            print(f'dict_codificacion_torre\n {dict_codificacion_torre}')
-            diferencia_ = tuple((diferencia[1], diferencia[0]))
-            accion_torre = dict_codificacion_torre[diferencia_]
-            print(f'accion_torre\n {accion_torre}')
+            # print(f'dict_codificacion_torre\n {dict_codificacion_torre}')
+            accion_torre = dict_codificacion_torre[diferencia]
+            # print(f'accion_torre\n {accion_torre}')
             one_hot_torre[accion_torre] = 1
         else:
             raise ValueError(f"Pieza incorrecta. Se esperaba 1, 2 o 3 (pero se obtuvo {pieza})")
@@ -234,6 +216,14 @@ class ChessEncoder(EncoderProtocol):
         casillas = [from_index_pair, to_index_pair]
         return casillas
 
+    def filacol_a_algebraico(self, fila: int, columna: int) -> str:
+        return f"{chr(columna + 97)}{8 - fila}"
+    
+    def algebraico_a_filacol(self, algebraico: str) -> Tuple[int, int]:
+        columna = ord(algebraico[0]) - 97
+        fila = 8 - int(algebraico[1])
+        return fila, columna
+    
     def decode_action(self, board: Board, action: int) -> Move:
         """
         Decode a Gym action (int index) into a domain action.
@@ -254,17 +244,17 @@ class ChessEncoder(EncoderProtocol):
         fila, columna = np.where(obs == pieza_a_mover)
         assert(0 <= columna[0] < 8)
         assert(0 <= fila[0] < 8)
-        casilla_desde = f"{chr(columna[0] + 97)}{8 - fila[0]}"
-        casilla_desde_tuple = (columna[0], fila[0])
+        casilla_desde_tuple = (fila[0], columna[0])
+        casilla_desde = self.filacol_a_algebraico(*casilla_desde_tuple)
         
-        print(f"{casilla_desde=}")
+        # print(f"{casilla_desde=}")
         
         offset = self.rangos[pieza_a_mover - 1]
         indice_pieza = action - offset
         
         # print(f"{offset=}")
         # print(f"{indice_pieza=}")
-        print(f"{ChessEncoder._get_list_acciones_torre(casilla_desde_tuple)=}")
+        # print(f"{ChessEncoder._get_list_acciones_torre(casilla_desde_tuple)=}")
         if pieza_a_mover in [1, 2]:
             fila_mas, columna_mas = self.list_codificacion_rey[indice_pieza]
         elif pieza_a_mover in [3]:
@@ -277,21 +267,21 @@ class ChessEncoder(EncoderProtocol):
         fila, columna = casilla_hasta_
         assert(0 <= columna < 8), f"{columna=}"
         assert(0 <= fila < 8), f"{fila=}"
-        casilla_hasta =  f"{chr(columna[0] + 97)}{8 - fila[0]}"
+        casilla_hasta = self.filacol_a_algebraico(fila[0], columna[0])
         algebraico = f"{casilla_desde}{casilla_hasta}"
         return Move.from_uci(algebraico)
     
     @staticmethod
     def _get_list_acciones_torre(casilla_desde: Tuple[int, int]) -> List[Tuple[int,int]]:
-        i, j = casilla_desde
-        x_list = [(0,k) for k in range(-i,8-i)]
-        y_list = [(k,0) for k in range(-j,8-j)]
+        i, j = casilla_desde # fila, columna
+        x_list = [(k,0) for k in range(-i,8-i)]
+        y_list = [(0,k) for k in range(-j,8-j)]
         list_acciones = x_list + y_list
         list_acciones = [pareja for pareja in list_acciones if pareja != (0,0)]
         return list_acciones
 
     def _get_dict_codificacion_torre(self, action: Move) -> Dict[Tuple[int, int], int]:
         casilla_desde, casilla_hasta = self.casillas_desde_hasta(action)
-        list_acciones = self._get_list_acciones_torre((casilla_desde[1], casilla_desde[0]))       
+        list_acciones = self._get_list_acciones_torre(casilla_desde)       
         dict_codificacion_torre = {casilla:i for i, casilla in enumerate(list_acciones)}
         return dict_codificacion_torre
