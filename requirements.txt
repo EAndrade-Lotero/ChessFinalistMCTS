@@ -7,7 +7,7 @@ pandas==3.0.0
 Pillow==12.1.0
 pydot==4.0.1
 stable_baselines3==2.6.0
-torch==2.7.0
+torch
 tqdm==4.67.1
 typing_extensions==4.15.0
 chess==1.11.2
