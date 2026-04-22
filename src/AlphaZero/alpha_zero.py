@@ -473,17 +473,28 @@ class GameSearchTree:
         # ------------------------------------------------------------------ #
         def label_fn(node: SearchTreeNode) -> str:
             state = node.state
-            print(state)
+            # print("="*60)
+            # print(state)
+            # print(f"Move: {node.action}")
+            # print("="*60)
+
             player = self.game.player(state)
-            state_, player = self.encoder.encode_obs(state)
-            print(state_)
-            v = self.value_network(state_)
-            q = self.policy_network(state_)[node.action]
+
+            if node.action is not None:
+                state_ = self.encoder.encode_obs(state)
+                state_ = self.encoder.to_array(state_)
+                v = self.value_network(state_).item()
+                action = self.encoder.encode_action(node.parent.state, node.action)
+                # print(f"====>{action=}")
+                q = self.policy_network(state_).squeeze().tolist()[action]
+                puct = node.puct(self.total_playouts, q, v)
+                # print(puct, type(puct))
+            else:
+                puct = 0.0
 
             msg = f"Value={node.value}\n"
             msg += f"To play={player}\n"
-            msg += f"PUCT={node.puct(self.total_playouts, q, v):.2f}\n"
-            msg += f"Fully expanded={node.is_fully_expanded()}\n"
+            msg += f"PUCT={puct:.2f}\n"
             msg += f"Finished={node.finished}\n"
             msg += f"Terminal={self.game.is_terminal(node.state)}"
             if node.action is None:

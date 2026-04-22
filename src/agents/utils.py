@@ -205,7 +205,8 @@ class ChessEncoder(EncoderProtocol):
             raise ValueError(f"Pieza incorrecta. Se esperaba 1, 2 o 3 (pero se obtuvo {pieza})")
 
         one_hot = np.concat([one_hot_rey_negro, one_hot_rey_blanco, one_hot_torre])
-        return one_hot
+        action_index = np.argmax(one_hot)
+        return action_index
         
     def casillas_desde_hasta(self, action: Move) -> Tuple[int, int]:
         coded_index = action.from_square
