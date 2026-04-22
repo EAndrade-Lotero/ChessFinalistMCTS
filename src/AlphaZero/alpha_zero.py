@@ -29,8 +29,8 @@ from itertools import count
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Tuple, Set, Optional
 
-from agents.base_classes import PolicyProtocol, GameProtocol
-from mcts import PriorityQueue, NodeValue
+from agents.base_classes import PolicyProtocol, GameProtocol, EncoderProtocol
+from mcts.trees import PriorityQueue, NodeValue
 
 import heapq
 import itertools
@@ -69,6 +69,7 @@ class SearchTreeNode:
         parent: "SearchTreeNode | None",
         action: "Any | None",
         value: NodeValue,
+        puct_constant: float,
     ) -> None:
         self.state = state
         self.player = player
@@ -170,11 +171,15 @@ class GameSearchTree:
         n_iterations: int,
         value_network,
         policy_network,
+        encoder: EncoderProtocol,
         rng: Optional[Generator] = None
     ) -> None:
         # Networks
         self.value_network = value_network
         self.policy_network = policy_network
+
+        # Encoder
+        self.encoder = encoder
 
         # Random number generator
         self.rng: Generator = rng or default_rng()
@@ -352,8 +357,6 @@ class GameSearchTree:
         if not actions:
             raise Exception('Error: No valid actions from root!')
 
-        if len(actions) > self.beam_width:
-            actions = self.rng.choice(actions, self.beam_width, replace=False).tolist()
         self._root_actions = actions
 
         # Root node
@@ -362,7 +365,6 @@ class GameSearchTree:
             player=player,
             parent=None,
             action=None,
-            untried_actions=[],
             value=NodeValue(0, 0),
             puct_constant=self.puct_constant,
         )
@@ -372,16 +374,11 @@ class GameSearchTree:
             # Find Player
             player = self.game.player(new_state)
 
-            untried_actions = self.game.actions(new_state)
-            if len(untried_actions) > self.beam_width:
-                untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
-
             child = SearchTreeNode(
                 state=new_state,
                 player=player,
                 parent=self.root, 
                 action=a, 
-                untried_actions=untried_actions,
                 value=NodeValue(0, 0),
                 puct_constant=self.puct_constant
             )
@@ -475,10 +472,17 @@ class GameSearchTree:
         # 1.  User-facing label function (make it a real Callable for mypy)
         # ------------------------------------------------------------------ #
         def label_fn(node: SearchTreeNode) -> str:
-            player = self.game.player(node.state)
+            state = node.state
+            print(state)
+            player = self.game.player(state)
+            state_, player = self.encoder.encode_obs(state)
+            print(state_)
+            v = self.value_network(state_)
+            q = self.policy_network(state_)[node.action]
+
             msg = f"Value={node.value}\n"
             msg += f"To play={player}\n"
-            msg += f"UCB={node.ucb(self.total_playouts):.2f}\n"
+            msg += f"PUCT={node.puct(self.total_playouts, q, v):.2f}\n"
             msg += f"Fully expanded={node.is_fully_expanded()}\n"
             msg += f"Finished={node.finished}\n"
             msg += f"Terminal={self.game.is_terminal(node.state)}"

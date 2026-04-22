@@ -114,7 +114,8 @@ class ChessEncoder(EncoderProtocol):
             array = np.concat([array, np.ones(1)])
         else:
             array = np.concat([array, np.zeros(1)])
-        return ChessEncoder._norm_array(array)
+        # return ChessEncoder._norm_array(array)
+        return array.astype(np.float32)
     
     def decode_obs(self, observation: Tuple[np.ndarray, str]) -> Board:
         """
@@ -147,8 +148,14 @@ class ChessEncoder(EncoderProtocol):
             if sum_empty > 0:
                 row_string += str(sum_empty) 
             return row_string
-        board, player = observation
+
+        if isinstance(observation, np.ndarray):
+            board = observation[:-1]
+            player = 'w' if observation[-1] == 1 else 'b'
+        else:        
+            board, player = observation
         board = board.reshape((8,8))
+
         t1 = [process_row(row) for row in board]
         fen_suffix = f" {player}"
         board = '/'.join(t1) + fen_suffix
