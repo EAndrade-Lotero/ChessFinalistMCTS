@@ -89,22 +89,25 @@ class SearchTreeNode:
         -------
         (root_action, updated_root_value)
         """
-        if self.player == "white":
-            #If Player is white, black has just played
-            if result == 1:
-                #Black Lost
-                pass
-            elif result == -1:
-                #Black Won
-                self.value.reward -= result
-        elif self.player == "black":
-            #If Player is black, white has just played
-            if result == 1:
-                #White Won
-                self.value.reward += result
-            elif result == -1:
-                #White Lost
-                pass
+
+        self.value.reward += result
+
+        # if self.player == "white":
+        #     #If Player is white, black has just played
+        #     if result == 1:
+        #         #Black Lost
+        #         pass
+        #     elif result == -1:
+        #         #Black Won
+        #         self.value.reward -= result
+        # elif self.player == "black":
+        #     #If Player is black, white has just played
+        #     if result == 1:
+        #         #White Won
+        #         self.value.reward += result
+        #     elif result == -1:
+        #         #White Lost
+        #         pass
 
         self.value.playouts += 1
 
@@ -114,10 +117,10 @@ class SearchTreeNode:
             # recurse until we reach depth 0
             return self.parent.backpropagate(result)  # type: ignore[arg-type]
 
-    def puct(self, total_visits: int, q: float, v: float) -> float:
+    def puct(self, total_visits: int, p: float) -> float:
         """PUCT"""
-        exploration = self.puct_constant * v * np.sqrt(total_visits) / (1 + self.value.playouts)
-        return q + exploration
+        exploration = self.puct_constant * p * np.sqrt(total_visits) / (1 + self.value.playouts)
+        return self.mean_value() + exploration
 
     def mean_value(self) -> float:
         return (
@@ -166,7 +169,6 @@ class GameSearchTree:
         self,
         root: Any | SearchTreeNode,
         game: GameProtocol,
-        sim_limit: int,
         puct_constant: float,
         n_iterations: int,
         value_network,
@@ -190,7 +192,6 @@ class GameSearchTree:
                 "`game` must implement a Game Protocol."
             )
         self.game = game
-        self.sim_limit = sim_limit
         self.puct_constant = puct_constant
         self.n_iterations = n_iterations
 
@@ -419,19 +420,6 @@ class GameSearchTree:
         self.total_playouts += 1
         action, new_val = node.backpropagate(result)
 
-    # ---------------- Policy rollout -------------------------------- #
-    def make_rollout(self, node: SearchTreeNode) -> float:
-        """Self-play using rollout policy"""
-        counter = 0
-        state = node.state.copy()
-        while (counter < self.sim_limit) and (not self.game.is_terminal(state)):
-            action = self.rollout_policy(state)
-            state = self.game.result(state, action)
-            counter += 1
-        utility = self.game.utility(state)
-        if utility == 0: utility = -1
-        return utility
-
     # ---------------- The pipeline -------------------------------------- #
     def make_decision(self) -> Any | None:
 
@@ -486,8 +474,8 @@ class GameSearchTree:
                 v = self.value_network(state_).item()
                 action = self.encoder.encode_action(node.parent.state, node.action)
                 # print(f"====>{action=}")
-                q = self.policy_network(state_).squeeze().tolist()[action]
-                puct = node.puct(self.total_playouts, q, v)
+                p = self.policy_network(state_).squeeze().tolist()[action]
+                puct = node.puct(self.total_playouts, p)
                 # print(puct, type(puct))
             else:
                 puct = 0.0

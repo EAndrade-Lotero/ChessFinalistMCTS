@@ -76,6 +76,12 @@ class PriorityQueue(Generic[T]):
 
     def __bool__(self) -> bool:  # allows: if pq:
         return bool(self._heap)
+    
+    def __str__(self) -> str:
+        text = ""
+        for p, _, item in self._heap:
+            text += f"Priority: {self._sign * p}, Item: {item.action}\n"
+        return text if text else "PriorityQueue is empty."
 
 
 # --------------------------------------------------------------------------- #
@@ -146,24 +152,33 @@ class SearchTreeNode:
         -------
         (root_action, updated_root_value)
         """
-        if self.player == "white":
-            #If Player is white, black has just played
-            if result == 1:
-                #Black Lost
-                pass
-            elif result == -1:
-                #Black Won
-                self.value.reward -= result
-        elif self.player == "black":
-            #If Player is black, white has just played
-            if result == 1:
-                #White Won
-                self.value.reward += result
-            elif result == -1:
-                #White Lost
-                pass
+        print(
+            f"Backpropagating result {result} from node with action {self.action}\n"
+            f"\tat depth {self.depth()} for player {self.player}"
+        )
+
+        self.value.reward += result
+        
+        # if self.player == "white":
+        #     #If Player is white, black has just played
+        #     if result == 1:
+        #         #Black Lost
+        #         self.value.reward += result
+        #     elif result == -1:
+        #         #Black Won
+        #         self.value.reward -= result
+        # elif self.player == "black":
+        #     #If Player is black, white has just played
+        #     if result == 1:
+        #         #White Won
+        #         self.value.reward += result
+        #     elif result == -1:
+        #         #White Lost
+        #         self.value.reward -= result
 
         self.value.playouts += 1
+
+        print(f"Updated node value: {self.value}")
 
         if self.depth() == 0:  # parent is the root
             return self.action, self.value
@@ -307,6 +322,8 @@ class GameSearchTree:
         for child in node.children:
             ucb = child.ucb(self.total_playouts) * multiplier
             children.push(ucb, child)
+
+        # print(f"Priority queue:\n{children}")
 
         # Iterate to find child with best ucb with conditions
         child = None
@@ -471,6 +488,7 @@ class GameSearchTree:
             node=node, 
             skip_finished=True
         )
+        print(f"Selected child with action {best_child.action if best_child else None} and UCB {best_child.ucb(self.total_playouts) if best_child else None} from node with action {node.action} and UCB {node.ucb(self.total_playouts)}")
         if best_child is None:
             print(f"{node.state}")
             raise Exception(f"Ooops, didn't find usable best child from node\n{node}\nThe action history is:\n{node.get_action_history()}")
