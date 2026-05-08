@@ -138,9 +138,10 @@ class SearchTreeNode:
             return self.parent.get_action_history() + [str(self.action)]
 
     def is_finished(self) -> bool:
-        if self.finished:
-            return True
-        return np.all([child.finished for child in self.children])
+        # if self.finished:
+        #     return True
+        # return np.all([child.finished for child in self.children])
+        return self.finished
 
     def __str__(self) -> str:
         root_flag = "--root--" if self.parent is None else ""
@@ -150,6 +151,8 @@ class SearchTreeNode:
             s += f"From action: {self.action}\nValue: {self.value}\n"
         return s
 
+    def is_fully_expanded(self) -> bool:
+        return len(self.children) != 0
 
 # --------------------------------------------------------------------------- #
 #                       3.  MCTS                                              #
@@ -231,36 +234,49 @@ class GameSearchTree:
         else:
             return best_child.action
 
-    def get_child_with_highest_ucb(
+    def get_child_with_highest_puct(
         self, 
         node: SearchTreeNode, 
         skip_finished: Optional[bool] = True,
         skip_terminals: Optional[bool] = True,
     ) -> Any | None:
-        """Pick the node's child with highest UCB"""
-        multiplier = 1
-        """multiplier = 1 if self.game.player(node.state) == 'white' else -1"""
-        """print(f"{multiplier=}")"""
-        best_ucb = -np.inf * multiplier
+        """Pick the node's child with highest PUCT"""
+        best_puct = -np.inf
         matches = []
 
         # Create priority queue with children
         children = PriorityQueue()
         for child in node.children:
-            ucb = child.ucb(self.total_playouts) * multiplier
-            children.push(ucb, child)
+            p = self.get_p(child)
+            puct = child.puct(self.total_playouts, p)
+            children.push(puct, child)
+
+        # print(f"Queue: {children}")
 
         # Iterate to find child with best ucb with conditions
         child = None
         while child is None and children:
-            best_ucb, child = children.pop()
+            best_puct, child = children.pop()
             is_terminal = self.game.is_terminal(child.state)
+            # print(
+            #     f"Child {child.action} " 
+            #     f"with PUCT {best_puct:.2f} " 
+            #     f"and terminal={is_terminal} " 
+            #     f"and finished={child.is_finished()}"
+            # )
             # if is_terminal and skip_terminals: 
             #     child = None
             #     continue
             if child.is_finished() and skip_finished:
                 child = None
                 continue
+
+        # print(
+        #     f"Child {child.action} " 
+        #     f"with PUCT {best_puct:.2f} " 
+        #     f"and terminal={is_terminal} " 
+        #     f"and finished={child.is_finished()}"
+        # )
 
         return child
 
@@ -381,10 +397,11 @@ class GameSearchTree:
                 parent=self.root, 
                 action=a, 
                 value=NodeValue(0, 0),
-                puct_constant=self.puct_constant
+                puct_constant=self.puct_constant,
             )
 
             if self.game.is_terminal(child.state):
+                print(f"Terminal child from root with action {a} and state\n{child.state}")
                 child.finished = True
                 result = self.game.utility(child.state)
                 self.backpropagate(child, result)
@@ -392,28 +409,42 @@ class GameSearchTree:
             self.root.children.append(child)
     
     # ---------------- selection & backup -------------------------------- #
-    def select_ucb(self) -> SearchTreeNode | None:
+    def select_puct(self) -> SearchTreeNode | None:
         """Tree search strategy"""
         node = self.root
-        best_node = self._recursive_select_ucb(node)
+        best_node = self._recursive_select_puct(node)
         return best_node
 
-    def _recursive_select_ucb(self, node: SearchTreeNode) -> SearchTreeNode | None:
+    def _recursive_select_puct(self, node: SearchTreeNode) -> SearchTreeNode | None:
         """Recursive search"""
 
-        best_child = self.get_child_with_highest_ucb(
+        best_child = self.get_child_with_highest_puct(
             node=node, 
             skip_finished=True
         )
+
+        # print(
+        #     f"Child {best_child.action} " 
+        #     f"and terminal={best_child.finished} " 
+        #     f"and finished={best_child.is_finished()}"
+        # )
+
         if best_child is None:
             print(f"{node.state}")
             raise Exception(f"Ooops, didn't find usable best child from node\n{node}\nThe action history is:\n{node.get_action_history()}")
 
+        # print(
+        #     f"Selected child {best_child.action} is fully expanded: {best_child.is_fully_expanded()} " 
+        #     f"and finished: {best_child.is_finished()} "
+        #     f"Num. children: {len(best_child.children)}"
+        # )
         if not best_child.is_fully_expanded():
             return best_child
+        
         elif best_child.is_finished():
             return None
-        return self._recursive_select_ucb(best_child)
+        
+        return self._recursive_select_puct(best_child)
 
     def backpropagate(self, node: SearchTreeNode, result: int) -> None:
         """Update stats and rebuild frontier priorities after each playout."""
@@ -430,9 +461,9 @@ class GameSearchTree:
         while counter < self.n_iterations:
 
             # Step 1: Node selection
-            node = self.select_ucb()
+            node = self.select_puct()
             if node is None:
-                raise Exception(f"Ooops, no ucb selection from node\n{node}\n{node.get_action_history()}")
+                raise Exception(f"Ooops, no puct selection from node\n{node}\n{node.get_action_history()}")
             elif node.is_fully_expanded():
                 raise Exception(f"Ooops, no expansion from node\n{node}\n{node.get_action_history()}")
             elif node.is_finished():
@@ -452,6 +483,13 @@ class GameSearchTree:
         # Get best action
         return self.get_best_root_action()  
   
+    def get_p(self, node: SearchTreeNode) -> float:
+        state_ = self.encoder.encode_obs(node.state)
+        state_ = self.encoder.to_array(state_)
+        action = self.encoder.encode_action(node.parent.state, node.action)
+        p = self.policy_network(state_).squeeze().tolist()[action]
+        return p
+
     # ---------------- visualization helpers -------------------------------- #   
     def to_pydot(self) -> pydot.Dot:
         """Return a pydot graph representing the current search tree."""
@@ -469,12 +507,13 @@ class GameSearchTree:
             player = self.game.player(state)
 
             if node.action is not None:
-                state_ = self.encoder.encode_obs(state)
-                state_ = self.encoder.to_array(state_)
-                v = self.value_network(state_).item()
-                action = self.encoder.encode_action(node.parent.state, node.action)
-                # print(f"====>{action=}")
-                p = self.policy_network(state_).squeeze().tolist()[action]
+                # v = self.value_network(state_).item()
+                # state_ = self.encoder.encode_obs(state)
+                # state_ = self.encoder.to_array(state_)
+                # action = self.encoder.encode_action(node.parent.state, node.action)
+                # # print(f"====>{action=}")
+                # p = self.policy_network(state_).squeeze().tolist()[action]
+                p = self.get_p(node)
                 puct = node.puct(self.total_playouts, p)
                 # print(puct, type(puct))
             else:
