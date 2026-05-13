@@ -202,6 +202,8 @@ class ChessEncoder(EncoderProtocol):
             # print(f'accion_torre\n {accion_torre}')
             one_hot_torre[accion_torre] = 1
         else:
+            print(f"Error al decodificar accion {action} en el tablero:")
+            print(board)
             raise ValueError(f"Pieza incorrecta. Se esperaba 1, 2 o 3 (pero se obtuvo {pieza})")
 
         one_hot = np.concat([one_hot_rey_negro, one_hot_rey_blanco, one_hot_torre])

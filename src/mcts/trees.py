@@ -96,7 +96,7 @@ class NodeValue:
 
     def __str__(self) -> str:  # For quick debugging prints
         value = self.reward/self.playouts if self.playouts != 0 else 0
-        return f"{self.reward}/{self.playouts} (={value})"
+        return f"{self.reward:.2f}/{self.playouts} (={value:.2f})"
 
 
 # --------------------------------------------------------------------------- #

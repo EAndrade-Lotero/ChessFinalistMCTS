@@ -216,16 +216,13 @@ class GameSearchTree:
         """Pick the root's action with highest UCB"""
 
         # Values of all actions from the root
-        value = self.value_network.predict(self.root.state)
+        value = self.get_v(self.root)
         
-        # Politica de todas las acciones desde la raiz
-        probabilities = self.policy_network.predict(self.root.state)
-
         # Create priority queue with children
         children = PriorityQueue()
         for child in self.root.children:
-            p = probabilities[child.action]
-            puct = child.puct(self.total_playouts, value, p)
+            p = self.get_p(child)
+            puct = child.puct(self.total_playouts, p)
             children.push(puct, child)
 
         _, best_child = children.pop()
@@ -329,41 +326,34 @@ class GameSearchTree:
         assert(not node.is_fully_expanded()), f"Error: Node is fully expanded and cannot be expanded!\n{node}\n{node.get_action_history()}"
         assert(not node.finished), f"Error: Node is finished and cannot be expanded!\n{node}\n{node.get_action_history()}"
 
-        # Choose an action according to rollout policy
-        probabilities_untried_actions = self.rollout_policy.predict_in_list(node.state, node.untried_actions)
-        action = self.rng.choice(node.untried_actions, p=probabilities_untried_actions)
-        if isinstance(node.untried_actions, list):
-            node.untried_actions.remove(action)
-        else:
-            raise Exception(f"Error: untried action should be a list (got {type(node.untried_actions)})")
+        state = node.state
 
-        # Create new child
-        new_state = self.game.result(node.state, action)
+        # Get root actions
+        actions = self.game.actions(state)
+        if not actions:
+            raise Exception('Error: No valid actions from root!')
 
-        # Find player
-        player = self.game.player(new_state)
+        for a in actions:
+            new_state = self.game.result(state, a)
+            # Find Player
+            player = self.game.player(new_state)
 
-        untried_actions = self.game.actions(new_state)
-        if len(untried_actions) > self.beam_width:
-            untried_actions = self.rng.choice(untried_actions, self.beam_width, replace=False).tolist()
+            child = SearchTreeNode(
+                state=new_state,
+                player=player,
+                parent=node, 
+                action=a, 
+                value=NodeValue(0, 0),
+                puct_constant=self.puct_constant,
+            )
 
-        child = SearchTreeNode(
-            state=new_state,
-            player= player,
-            parent=node,
-            action=action,
-            untried_actions=untried_actions,
-            value=NodeValue(0, 0),
-            puct_constant=self.puct_constant
-        )
+            if self.game.is_terminal(child.state):
+                # print(f"Terminal child from root with action {a} and state\n{child.state}")
+                child.finished = True
+                result = self.game.utility(child.state)
+                self.backpropagate(child, result)
 
-        if self.game.is_terminal(child.state):
-            child.finished = True
-            result = self.game.utility(child.state)
-            self.backpropagate(child, result)
-
-        node.children.append(child)
-        node.finished = node.is_finished()
+            node.children.append(child)
 
     def _expand_root(self, state: Any) -> None:
         # Find Player
@@ -401,7 +391,7 @@ class GameSearchTree:
             )
 
             if self.game.is_terminal(child.state):
-                print(f"Terminal child from root with action {a} and state\n{child.state}")
+                # print(f"Terminal child from root with action {a} and state\n{child.state}")
                 child.finished = True
                 result = self.game.utility(child.state)
                 self.backpropagate(child, result)
@@ -430,7 +420,12 @@ class GameSearchTree:
         # )
 
         if best_child is None:
-            print(f"{node.state}")
+            print(
+                f"{node.state}"
+                f"\nPuct: {node.puct(self.total_playouts, self.get_p(node))}"
+                f"\nChildren: {[n.action for n in node.children]}"
+                f"\nfinished={node.is_finished()}"
+            )
             raise Exception(f"Ooops, didn't find usable best child from node\n{node}\nThe action history is:\n{node.get_action_history()}")
 
         # print(
@@ -473,10 +468,10 @@ class GameSearchTree:
             self.expand_node(node)
 
             # Step 3: Rollout
-            rollout_result = self.make_rollout(node)
+            result = self.get_v(node)
 
             # Step 4: Backpropagate
-            self.backpropagate(node, rollout_result)
+            self.backpropagate(node, result)
 
             counter += 1
 
@@ -489,6 +484,12 @@ class GameSearchTree:
         action = self.encoder.encode_action(node.parent.state, node.action)
         p = self.policy_network(state_).squeeze().tolist()[action]
         return p
+
+    def get_v(self, node: SearchTreeNode) -> float:
+        state_ = self.encoder.encode_obs(node.state)
+        state_ = self.encoder.to_array(state_)
+        v = self.value_network(state_).squeeze().item()
+        return v
 
     # ---------------- visualization helpers -------------------------------- #   
     def to_pydot(self) -> pydot.Dot:
@@ -518,6 +519,8 @@ class GameSearchTree:
                 # print(puct, type(puct))
             else:
                 puct = 0.0
+
+            node_value = self.get_v(node)
 
             msg = f"Value={node.value}\n"
             msg += f"To play={player}\n"
