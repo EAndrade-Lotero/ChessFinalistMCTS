@@ -420,6 +420,8 @@ class GameSearchTree:
         # )
 
         if best_child is None:
+            if len(node.children) == 0 and not node.is_finished():
+                return node
             print(
                 f"{node.state}"
                 f"\nPuct: {node.puct(self.total_playouts, self.get_p(node))}"
@@ -434,10 +436,12 @@ class GameSearchTree:
         #     f"Num. children: {len(best_child.children)}"
         # )
         if not best_child.is_fully_expanded():
+            # len == 0
             return best_child
         
         elif best_child.is_finished():
             return None
+        
         
         return self._recursive_select_puct(best_child)
 
