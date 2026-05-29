@@ -16,24 +16,20 @@ Requirements
 
 from __future__ import annotations
 
-import heapq
 import pydot
+import torch
+from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
 from numpy.random import Generator, default_rng
 
-from tqdm.auto import tqdm
-
 from pprint import pprint
 from itertools import count
-from collections import defaultdict
 from typing import Any, Callable, Dict, List, Tuple, Set, Optional
 
 from agents.base_classes import PolicyProtocol, GameProtocol, EncoderProtocol
 from mcts.trees import PriorityQueue, NodeValue
 
-import heapq
-import itertools
 from typing import Generic, TypeVar, Tuple
 
 T = TypeVar("T")
@@ -482,6 +478,13 @@ class GameSearchTree:
         # Get best action
         return self.get_best_root_action()  
   
+    def to_tensor(self, node: SearchTreeNode, device: str='cpu') -> torch.tensor:
+        state_ = self.encoder.encode_obs(node.state)
+        state_ = self.encoder.to_array(state_)
+        s_tensor = torch.tensor(state_, dtype=torch.float32).to(device)
+        # s_tensor /= 3
+        return s_tensor
+
     def get_p(self, node: SearchTreeNode) -> float:
         state_ = self.encoder.encode_obs(node.state)
         state_ = self.encoder.to_array(state_)
@@ -573,3 +576,64 @@ class GameSearchTree:
                 stack.append(child)
 
         return graph
+    
+    def padded_policy(node: SearchTreeNode) -> np.ndarray:
+        policy = np.array([
+            children.value.playouts for children in node.children
+        ])
+        policy = policy / sum(policy)
+        ######
+        # Poner 0 en las acciones que no se pueden
+
+        # Recorrer las 30 posibles acciones
+        # Con try -> mantiene el valor
+        # Con except -> pone 0
+        ######
+        pass
+
+
+class AlphaZeroDataset(Dataset):
+
+    def __init__(self, tree: GameSearchTree):
+        self.samples = []
+        self.tree = tree
+        self.device = 'cpu'
+
+    def add(self, node: SearchTreeNode) -> None:
+        # state
+        s_tensor = self.tree.to_tensor(node)
+
+        # policy
+        policy = self.tree.padded_policy(node)
+
+        # root_value
+        root_value = node.mean_value()
+
+        self.add_sample(s_tensor, policy, root_value)
+
+    def add_sample(self, state, policy, root_value):
+        """
+        state  -> representación del tablero
+        policy -> distribución MCTS
+        root_value  -> resultado final z
+        """
+        self.samples.append(
+            (
+                torch.tensor(state, dtype=torch.float32).to(self.device),
+                torch.tensor(policy, dtype=torch.float32).to(self.device),
+                torch.tensor(root_value, dtype=torch.float32).to(self.device),
+            )
+        )
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        return self.samples[idx]
+
+    def create_dataloader(self, batch_size=32, shuffle=True):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
