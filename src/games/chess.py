@@ -85,6 +85,16 @@ class KRK(GameProtocol):
             self._POSITIONS[start_position] + fen_suffix
         )
 
+    def reset(self, side_to_move: str = "white", start_position: int = 1) -> chess.Board:
+        """
+        Return the initial board state.
+        """
+        fen_suffix = " w" if side_to_move == "white" else " b"
+        self.initial_state: chess.Board = chess.Board(
+            self._POSITIONS[start_position] + fen_suffix
+        )
+        return copy.deepcopy(self.initial_state)
+
     # --------------------------------------------------------------------- #
     #                               Helpers                                  #
     # --------------------------------------------------------------------- #

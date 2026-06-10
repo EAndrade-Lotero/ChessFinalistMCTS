@@ -22,15 +22,20 @@ from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
 from numpy.random import Generator, default_rng
+from typing import Generic, TypeVar, Tuple
 
 from pprint import pprint
 from itertools import count
 from typing import Any, Callable, Dict, List, Tuple, Set, Optional
+from stable_baselines3.a2c import A2C
 
 from agents.base_classes import PolicyProtocol, GameProtocol, EncoderProtocol
 from mcts.trees import PriorityQueue, NodeValue
-
-from typing import Generic, TypeVar, Tuple
+from games.chess import KRK
+from agents.utils import ChessEncoder
+from agents.random_agent import RandomAgent
+from agents.random_policy import GameUniformPolicy
+from games.game_utils import GymEnvFromGameAndPlayer2
 
 T = TypeVar("T")
 
@@ -577,11 +582,31 @@ class GameSearchTree:
 
         return graph
     
-    def padded_policy(node: SearchTreeNode) -> np.ndarray:
+    def padded_policy(self, node: SearchTreeNode) -> np.ndarray:
+
+        def get_frequency_for_action(node, move, sum):
+            assert isinstance(move, chess.Move)
+            for child in node.children:
+                if child.action == move:
+                    return child.value.playouts / sum
+            return 0.0
+
         policy = np.array([
             children.value.playouts for children in node.children
         ])
-        policy = policy / sum(policy)
+
+        sum_ = sum(policy)
+        policy_every_action = np.zeros(self.encoder.n_actions)
+
+        for i in range(self.encoder.n_actions):
+            try:
+                move = self.encoder.decode_action(state, i)
+                policy_every_action[i] = get_frequency_for_action(self.root, move, sum_)
+            except Exception as e:
+                # print(f"Error decoding action index {i}: {e}")
+                policy_every_action[i] = 0.0
+
+        return policy_every_action
         ######
         # Poner 0 en las acciones que no se pueden
 
@@ -589,7 +614,7 @@ class GameSearchTree:
         # Con try -> mantiene el valor
         # Con except -> pone 0
         ######
-        pass
+        # pass
 
 
 class AlphaZeroDataset(Dataset):
@@ -637,3 +662,207 @@ class AlphaZeroDataset(Dataset):
             batch_size=batch_size,
             shuffle=shuffle,
         )
+
+
+class SelfPlay:
+
+    def __init__(self, start_position, puct_constant, n_iterations):
+        self.seed = 4
+        self.rng = default_rng(self.seed)
+        
+        self.game = KRK(start_position=start_position)
+        random_policy = GameUniformPolicy(
+            game=self.game,
+            rng=self.rng,
+            encoder=None
+        )
+        pl2 = RandomAgent(
+            policy=random_policy,
+            rng=self.rng
+        )
+        encoder = ChessEncoder()
+        self.env = GymEnvFromGameAndPlayer2(
+            game=self.game,
+            other_player=pl2,
+            encoder=encoder
+        )
+        
+        self.agent = A2C('MlpPolicy', self.env, verbose=0)
+        self.rewards = []
+
+        self.params = {
+            "puct_constant": puct_constant,
+            "value_network": self.value_network,
+            "policy_network": self.policy_network,
+            "encoder": encoder,
+            "n_iterations": 100,
+            "rng":self.rng
+        }
+        state = self.game.initial_state
+        self.tree = GameSearchTree(
+            root=state,
+            game=self.game,
+            **self.params
+        )
+
+        self.dataset = AlphaZeroDataset(self.tree)
+        self.dataloader = None
+        self.epochs = 4
+        self.device = 'cpu'
+        self.debug = True
+
+    def value_network(self, state):
+        # Convert state to tensor
+        tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+        # Add batch dimension
+        tensor = tensor.unsqueeze(dim=0)
+        # Get value prediction from the policy
+        with torch.no_grad():
+            value = self.agent.policy.predict_values(tensor)
+        return value
+
+    def policy_network(self, state):
+        # Convert state to tensor
+        tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+        # Add batch dimension
+        tensor = tensor.unsqueeze(dim=0)
+        # Get value prediction from the policy
+        with torch.no_grad():
+            distribution = self.agent.policy.get_distribution(tensor)
+            probs = distribution.distribution.probs
+        return probs
+
+    def step(self):
+
+        best_action = self.tree.make_decision()
+
+        if self.debug:
+            print(f"We are here:\n{self.tree.root.state}")
+            print(f"Best action: {best_action}")
+
+        # state = self.game.result(self.tree.root.state, best_action)
+        self.dataset.add(self.tree.root)
+        root = self.tree.get_root_child_from_action(best_action)
+        self.tree =GameSearchTree(
+            root=root,
+            game=self.game,
+            **self.params,
+        )
+
+    def train_epoch(self):
+        if self.dataloader is not None:
+            for states, target_pi, target_z in self.dataloader:
+
+                # ---------------------------------
+                # Forward pass through shared encoder
+                # ---------------------------------
+
+                features = self.agent.policy.extract_features(states)
+
+                latent_pi, latent_vf = self.agent.policy.mlp_extractor(features)
+
+                # ---------------------------------
+                # POLICY HEAD
+                # ---------------------------------
+
+                pred_pi_logits = self.agent.policy.action_net(latent_pi)
+                # print(f"pred_pi_logits: {pred_pi_logits}")
+
+                # ---------------------------------
+                # VALUE HEAD
+                # ---------------------------------
+
+                pred_v = self.agent.policy.value_net(latent_vf)
+
+                # ---------------------------------
+                # VALUE LOSS
+                # ---------------------------------
+
+                value_loss = torch.mean(
+                    (target_z - pred_v.squeeze()) ** 2
+                )
+
+                # ---------------------------------
+                # POLICY LOSS
+                # ---------------------------------
+
+                log_probs = torch.log_softmax(
+                    pred_pi_logits,
+                    dim=1,
+                )
+                print(f"log_probs: {log_probs.shape}")
+                print(f"target_pi: {target_pi.shape}")
+
+                policy_loss = -torch.mean(
+                    torch.sum(
+                        target_pi * log_probs,
+                        dim=1,
+                    )
+                )
+
+                # ---------------------------------
+                # L2 REGULARIZATION
+                # ---------------------------------
+
+                l2_lambda = 1e-4
+
+                l2_loss = sum(
+                    p.pow(2).sum()
+                    for p in self.agent.policy.parameters()
+                )
+
+                # ---------------------------------
+                # TOTAL LOSS
+                # ---------------------------------
+
+                loss = (
+                    value_loss
+                    + policy_loss
+                    + l2_lambda * l2_loss
+                )
+
+                # ---------------------------------
+                # OPTIMIZATION STEP
+                # ---------------------------------
+
+                self.agent.policy.optimizer.zero_grad()
+
+                loss.backward()
+
+                self.agent.policy.optimizer.step()
+
+                if self.debug:
+                    print(
+                        f"value_loss={value_loss.item():.4f} | "
+                        f"policy_loss={policy_loss.item():.4f} | "
+                        f"total={loss.item():.4f}"
+                    )        
+
+    def train(self):
+        self.dataloader = self.dataset.create_dataloader(batch_size=32, shuffle=True)
+        for epoch in range(self.epochs):
+            self.train_epoch()
+
+    def run_timesteps(self, n_timesteps):
+        for _ in range(n_timesteps):
+            if self.game.is_terminal(self.tree.root.state):
+                start_position = self.rng.choice(range(1, 3))
+                self.game.reset(start_position=start_position)
+                self.tree = GameSearchTree(
+                    root=self.game.initial_state,
+                    game=self.game,
+                    **self.params,
+                )
+
+                if self.debug:
+                    print(f"Game reset to position {start_position}:\n{self.game.initial_state}")
+
+            else:
+                self.step()
+    
+
+    ##### Falta:
+    # - El dataset debe ser una pila
+    # - Hacer train cada N pasos, con un batch del dataset
+    # - Usar self.rewards para guardar el utility de cada estado terminal
+    # - Reportar una grafica de rewards a lo largo del tiempo
