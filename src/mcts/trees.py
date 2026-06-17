@@ -142,6 +142,7 @@ class SearchTreeNode:
         self.ucb_constant = ucb_constant
         self.children = []
         self.finished = False
+        self.debug = False
         
     # ------------- Monte-Carlo helpers ---------------------------------- #
     def backpropagate(self, result: int) -> Tuple[Any, NodeValue]:
@@ -152,10 +153,11 @@ class SearchTreeNode:
         -------
         (root_action, updated_root_value)
         """
-        print(
-            f"Backpropagating result {result} from node with action {self.action}\n"
-            f"\tat depth {self.depth()} for player {self.player}"
-        )
+        if self.debug:
+            print(
+                f"Backpropagating result {result} from node with action {self.action}\n"
+                f"\tat depth {self.depth()} for player {self.player}"
+            )
 
         self.value.reward += result
         
@@ -178,7 +180,8 @@ class SearchTreeNode:
 
         self.value.playouts += 1
 
-        print(f"Updated node value: {self.value}")
+        if self.debug:
+            print(f"Updated node value: {self.value}")
 
         if self.depth() == 0:  # parent is the root
             return self.action, self.value
@@ -287,6 +290,8 @@ class GameSearchTree:
             except Exception as e:
                 """print(f'A game state was expected, but something went wrong!')"""
                 raise e
+            
+        self.debug = False
 
     # ---------------- public helper to pick the best root move ----------- #
     def get_best_root_action(self) -> Any | None:
@@ -488,7 +493,8 @@ class GameSearchTree:
             node=node, 
             skip_finished=True
         )
-        print(f"Selected child with action {best_child.action if best_child else None} and UCB {best_child.ucb(self.total_playouts) if best_child else None} from node with action {node.action} and UCB {node.ucb(self.total_playouts)}")
+        if self.debug:
+            print(f"Selected child with action {best_child.action if best_child else None} and UCB {best_child.ucb(self.total_playouts) if best_child else None} from node with action {node.action} and UCB {node.ucb(self.total_playouts)}")
         if best_child is None:
             print(f"{node.state}")
             raise Exception(f"Ooops, didn't find usable best child from node\n{node}\nThe action history is:\n{node.get_action_history()}")

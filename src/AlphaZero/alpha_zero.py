@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pydot
 import torch
+from collections import deque
 from torch.utils.data import Dataset, DataLoader
 
 import numpy as np
@@ -511,6 +512,7 @@ class GameSearchTree:
         # 1.  User-facing label function (make it a real Callable for mypy)
         # ------------------------------------------------------------------ #
         def label_fn(node: SearchTreeNode) -> str:
+            p = None
             state = node.state
             # print("="*60)
             # print(state)
@@ -534,7 +536,10 @@ class GameSearchTree:
 
             node_value = self.get_v(node)
 
-            msg = f"Value={node.value}\n"
+            msg = f"Network_Value={node_value:.2f}\n"
+            if p is not None:
+                msg += f"Network_prob={p:.2f}\n"
+            msg += f"MCT_Value={node.value}\n"
             msg += f"To play={player}\n"
             msg += f"PUCT={puct:.2f}\n"
             msg += f"Finished={node.finished}\n"
@@ -619,8 +624,9 @@ class GameSearchTree:
 
 class AlphaZeroDataset(Dataset):
 
-    def __init__(self, tree: GameSearchTree):
-        self.samples = []
+    def __init__(self, tree: GameSearchTree, max_size: int = 100):
+        # Cambiamos la lista por un deque con tamaño máximo
+        self.samples = deque(maxlen=max_size)
         self.tree = tree
         self.device = 'cpu'
 
@@ -666,7 +672,18 @@ class AlphaZeroDataset(Dataset):
 
 class SelfPlay:
 
-    def __init__(self, start_position, puct_constant, n_iterations):
+    hyperparameters = {
+        "start_position_range": [1, 3],
+        "batch_size": 4,
+        "n_epochs": 2,
+        "n_timesteps": 10,
+        "device": "cpu",
+        "train_every": 5,
+        "min_samples_to_train": 5,
+        "buffer_size": 20,
+    }
+
+    def __init__(self, start_position, puct_constant):
         self.seed = 4
         self.rng = default_rng(self.seed)
         
@@ -706,14 +723,13 @@ class SelfPlay:
         )
 
         self.dataset = AlphaZeroDataset(self.tree)
-        self.dataloader = None
-        self.epochs = 4
-        self.device = 'cpu'
+        self.dataloader = None        
         self.debug = True
 
     def value_network(self, state):
+        device = self.hyperparameters["device"]
         # Convert state to tensor
-        tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+        tensor = torch.tensor(state, dtype=torch.float32).to(device)
         # Add batch dimension
         tensor = tensor.unsqueeze(dim=0)
         # Get value prediction from the policy
@@ -722,8 +738,9 @@ class SelfPlay:
         return value
 
     def policy_network(self, state):
+        device = self.hyperparameters["device"]
         # Convert state to tensor
-        tensor = torch.tensor(state, dtype=torch.float32).to(self.device)
+        tensor = torch.tensor(state, dtype=torch.float32).to(device)
         # Add batch dimension
         tensor = tensor.unsqueeze(dim=0)
         # Get value prediction from the policy
@@ -839,30 +856,63 @@ class SelfPlay:
                     )        
 
     def train(self):
-        self.dataloader = self.dataset.create_dataloader(batch_size=32, shuffle=True)
-        for epoch in range(self.epochs):
+        n_epochs = self.hyperparameters["n_epochs"]
+        for epoch in range(n_epochs):
             self.train_epoch()
 
-    def run_timesteps(self, n_timesteps):
-        for _ in range(n_timesteps):
+    def run_timesteps(self):
+        """
+        Args:
+            n_timesteps: Número total de pasos a ejecutar.
+            train_every: Cada cuántos timesteps se ejecutará el entrenamiento.
+            min_samples_to_train: Mínimo de datos requeridos en el dataset para entrenar.
+        """
+        self.rewards = []
+
+        batch_size = self.hyperparameters["batch_size"]
+        self.dataloader = self.dataset.create_dataloader(batch_size=batch_size, shuffle=True)
+
+        n_timesteps = self.hyperparameters["n_timesteps"]
+        train_every = self.hyperparameters["train_every"]
+        min_samples_to_train = self.hyperparameters["min_samples_to_train"]
+
+        for timestep in range(1, n_timesteps + 1):
+
             if self.game.is_terminal(self.tree.root.state):
+
+                reward = self.game.utility(self.tree.root.state)
+                self.rewards.append(reward)
+                if self.debug:
+                    print(f"Reward: {reward}")
+
                 start_position = self.rng.choice(range(1, 3))
-                self.game.reset(start_position=start_position)
-                self.tree = GameSearchTree(
-                    root=self.game.initial_state,
-                    game=self.game,
-                    **self.params,
-                )
+                self.reset_game(start_position)
 
                 if self.debug:
                     print(f"Game reset to position {start_position}:\n{self.game.initial_state}")
 
             else:
                 self.step()
+
+            # Disparar el entrenamiento cada 'train_every' pasos
+            if timestep % train_every == 0:
+                if len(self.dataset) >= min_samples_to_train:
+                    if self.debug:
+                        print(f"[Timestep {timestep}] Iniciando fase de entrenamiento...")
+                    self.train()
+                # elif self.debug:
+                #     print(f"[Timestep {timestep}] Entrenamiento saltado: datos insuficientes ({len(self.dataset)}/{min_samples_to_train})")
     
+    def reset_game(self, start_position=1):
+        assert self.hyperparameters["start_position_range"][0] <= start_position
+        assert start_position <= self.hyperparameters["start_position_range"][1]
+        self.game.reset(start_position=start_position)
+        self.tree = GameSearchTree(
+            root=self.game.initial_state,
+            game=self.game,
+            **self.params,
+        )
 
     ##### Falta:
-    # - El dataset debe ser una pila
-    # - Hacer train cada N pasos, con un batch del dataset
     # - Usar self.rewards para guardar el utility de cada estado terminal
     # - Reportar una grafica de rewards a lo largo del tiempo
