@@ -24,6 +24,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from numpy.random import Generator, default_rng
 from typing import Generic, TypeVar, Tuple
+from tqdm.auto import tqdm
 
 from pprint import pprint
 from itertools import count
@@ -377,6 +378,9 @@ class GameSearchTree:
             value=NodeValue(0, 0),
             puct_constant=self.puct_constant,
         )
+        v = self.get_v(self.root)
+        self.root.value.reward = v
+        self.root.value.playouts = 1
 
         for a in self._root_actions:
             new_state = self.game.result(state, a)
@@ -391,6 +395,9 @@ class GameSearchTree:
                 value=NodeValue(0, 0),
                 puct_constant=self.puct_constant,
             )
+            v = self.get_v(child)
+            child.value.reward = v
+            child.value.playouts = 1
 
             if self.game.is_terminal(child.state):
                 # print(f"Terminal child from root with action {a} and state\n{child.state}")
@@ -663,8 +670,10 @@ class AlphaZeroDataset(Dataset):
         return self.samples[idx]
 
     def create_dataloader(self, batch_size=32, shuffle=True):
+        # ARREGLAR ESTO:
+        sample_from_dataset = self # DEBE SER UNA MUESTRA
         return DataLoader(
-            self,
+            sample_from_dataset,
             batch_size=batch_size,
             shuffle=shuffle,
         )
@@ -773,28 +782,23 @@ class SelfPlay:
                 # ---------------------------------
                 # Forward pass through shared encoder
                 # ---------------------------------
-
                 features = self.agent.policy.extract_features(states)
-
                 latent_pi, latent_vf = self.agent.policy.mlp_extractor(features)
 
                 # ---------------------------------
                 # POLICY HEAD
                 # ---------------------------------
-
                 pred_pi_logits = self.agent.policy.action_net(latent_pi)
                 # print(f"pred_pi_logits: {pred_pi_logits}")
 
                 # ---------------------------------
                 # VALUE HEAD
                 # ---------------------------------
-
                 pred_v = self.agent.policy.value_net(latent_vf)
 
                 # ---------------------------------
                 # VALUE LOSS
                 # ---------------------------------
-
                 value_loss = torch.mean(
                     (target_z - pred_v.squeeze()) ** 2
                 )
@@ -802,14 +806,10 @@ class SelfPlay:
                 # ---------------------------------
                 # POLICY LOSS
                 # ---------------------------------
-
                 log_probs = torch.log_softmax(
                     pred_pi_logits,
                     dim=1,
                 )
-                print(f"log_probs: {log_probs.shape}")
-                print(f"target_pi: {target_pi.shape}")
-
                 policy_loss = -torch.mean(
                     torch.sum(
                         target_pi * log_probs,
@@ -820,9 +820,7 @@ class SelfPlay:
                 # ---------------------------------
                 # L2 REGULARIZATION
                 # ---------------------------------
-
                 l2_lambda = 1e-4
-
                 l2_loss = sum(
                     p.pow(2).sum()
                     for p in self.agent.policy.parameters()
@@ -831,7 +829,6 @@ class SelfPlay:
                 # ---------------------------------
                 # TOTAL LOSS
                 # ---------------------------------
-
                 loss = (
                     value_loss
                     + policy_loss
@@ -841,11 +838,8 @@ class SelfPlay:
                 # ---------------------------------
                 # OPTIMIZATION STEP
                 # ---------------------------------
-
                 self.agent.policy.optimizer.zero_grad()
-
                 loss.backward()
-
                 self.agent.policy.optimizer.step()
 
                 if self.debug:
@@ -856,6 +850,8 @@ class SelfPlay:
                     )        
 
     def train(self):
+        batch_size = self.hyperparameters["batch_size"]
+        self.dataloader = self.dataset.create_dataloader(batch_size=batch_size, shuffle=True)
         n_epochs = self.hyperparameters["n_epochs"]
         for epoch in range(n_epochs):
             self.train_epoch()
@@ -869,15 +865,16 @@ class SelfPlay:
         """
         self.rewards = []
 
-        batch_size = self.hyperparameters["batch_size"]
-        self.dataloader = self.dataset.create_dataloader(batch_size=batch_size, shuffle=True)
-
         n_timesteps = self.hyperparameters["n_timesteps"]
         train_every = self.hyperparameters["train_every"]
         min_samples_to_train = self.hyperparameters["min_samples_to_train"]
+        intervalo_10_porciento = max(1, n_timesteps // 10)
 
-        for timestep in range(1, n_timesteps + 1):
-
+        for timestep in tqdm(
+            range(1, n_timesteps + 1), 
+            miniters=intervalo_10_porciento, 
+            mininterval=0
+        ):
             if self.game.is_terminal(self.tree.root.state):
 
                 reward = self.game.utility(self.tree.root.state)
@@ -912,7 +909,3 @@ class SelfPlay:
             game=self.game,
             **self.params,
         )
-
-    ##### Falta:
-    # - Usar self.rewards para guardar el utility de cada estado terminal
-    # - Reportar una grafica de rewards a lo largo del tiempo
